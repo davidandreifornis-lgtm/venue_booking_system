@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Venue Availability — Venue Booking</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Fraunces', 'Georgia', 'serif'],
+            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            paper: '#faf8f5',
+            ink: '#1a1815',
+            muted: '#6b6560',
+            rule: '#e8e4dd',
+            accent: '#3d6b66',
+            'accent-soft': '#e6efee',
+            clay: '#b5623f',
+          },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: {
+            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url('/assets/noise.svg');
+      background-repeat: repeat;
+    }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Venue Availability">
+  <div id="app">
+    <p class="text-sm text-muted mb-6">Current venue inventory and status.</p>
+    <div id="venue-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
+
+  <script type="module">
+    import '../js/app.js';
+    import { getVenues } from '../js/api.js';
+    import { emptyState } from '../components/empty-state.js';
+    import { escapeHtml } from '../js/utils.js';
+    import { toast } from '../components/toast.js';
+
+    window.__pageInit = async function () {
+      const el = document.getElementById('venue-grid');
+      try {
+        const data = await getVenues();
+        const list = Array.isArray(data) ? data : data?.items || [];
+        if (!list.length) {
+          el.innerHTML = `<div class="col-span-full">${emptyState({ title: 'No venues available.' })}</div>`;
+          return;
+        }
+        el.innerHTML = list
+          .map(
+            (v) => `
+          <div class="border border-rule rounded-sm p-5 shadow-card">
+            <div class="flex items-start justify-between gap-2">
+              <h3 class="font-display text-lg font-medium tracking-[-0.02em]">${escapeHtml(v.name)}</h3>
+              <span class="text-[11px] uppercase tracking-[0.08em] ${v.status === 'Available' ? 'text-accent' : 'text-muted'}">${escapeHtml(v.status || '—')}</span>
+            </div>
+            <p class="text-sm text-muted mt-2">${escapeHtml(v.location || '')}</p>
+            <p class="text-sm text-muted mt-1">Capacity ${v.capacity ?? '—'}</p>
+            ${v.equipment ? `<p class="text-xs text-muted mt-3 border-t border-rule pt-3">${escapeHtml(Array.isArray(v.equipment) ? v.equipment.join(', ') : v.equipment)}</p>` : ''}
+          </div>`
+          )
+          .join('');
+      } catch {
+        el.innerHTML = `<div class="col-span-full">${emptyState({ title: 'No venues available.' })}</div>`;
+        toast('Unable to load venues. Backend not connected yet.', 'error');
+      }
+    };
+  </script>
+</body>
+</html>

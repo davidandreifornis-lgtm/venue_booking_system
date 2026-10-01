@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Venue Booking System</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <script type="module">
+    import { loadSession, isAuthed, role } from './js/auth.js';
+    await loadSession();
+    if (!isAuthed()) {
+      window.location.replace('/pages/login.html');
+    } else {
+      const map = {
+        Employee: '/pages/employee-dashboard.html',
+        Manager: '/pages/manager-dashboard.html',
+        HR: '/pages/hr-dashboard.html',
+        Administrator: '/pages/admin-dashboard.html',
+      };
+      window.location.replace(map[role()] || '/pages/login.html');
+    }
+  </script>
+</head>
+<body class="bg-paper"></body>
+</html>

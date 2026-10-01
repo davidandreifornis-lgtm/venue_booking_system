@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Venues — Venue Booking</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Fraunces', 'Georgia', 'serif'],
+            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            paper: '#faf8f5',
+            ink: '#1a1815',
+            muted: '#6b6560',
+            rule: '#e8e4dd',
+            accent: '#3d6b66',
+            'accent-soft': '#e6efee',
+            clay: '#b5623f',
+          },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: {
+            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url('/assets/noise.svg');
+      background-repeat: repeat;
+    }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Venues">
+  <div id="app">
+    <div class="flex items-center justify-between mb-6">
+      <p class="text-sm text-muted">Configure venues, capacity, and equipment.</p>
+      <button type="button" id="btn-add-venue" class="text-sm font-medium text-paper bg-ink px-4 py-2 rounded-sm hover:bg-ink/90">Add venue</button>
+    </div>
+    <div id="venues-table"></div>
+  </div>
+
+  <script type="module">
+    import '../js/app.js';
+    import { getVenues, createVenue, updateVenue, deactivateVenue } from '../js/api.js';
+    import { dataTable } from '../components/data-table.js';
+    import { formModal, confirm } from '../components/modal.js';
+    import { toast } from '../components/toast.js';
+    import { escapeHtml } from '../js/utils.js';
+
+    async function load() {
+      const el = document.getElementById('venues-table');
+      try {
+        const data = await getVenues();
+        const list = Array.isArray(data) ? data : data?.items || [];
+        dataTable({
+          container: el,
+          columns: [
+            { key: 'name', label: 'Venue Name' },
+            { key: 'location', label: 'Location' },
+            { key: 'capacity', label: 'Capacity' },
+            { key: 'equipment', label: 'Equipment', render: (r) => (Array.isArray(r.equipment) ? r.equipment.join(', ') : r.equipment) || '—' },
+            { key: 'status', label: 'Status', render: (r) => r.status || 'Available' },
+            {
+              key: 'actions',
+              label: 'Actions',
+              sortable: false,
+              render: (r) => `
+                <button type="button" class="text-accent hover:underline text-sm mr-2 btn-edit" data-id="${escapeHtml(r.id)}">Edit</button>
+                <button type="button" class="text-clay hover:underline text-sm btn-deact" data-id="${escapeHtml(r.id)}">Deactivate</button>
+              `,
+            },
+          ],
+          rows: list,
+          empty: { title: 'No venues have been added yet.' },
+        });
+
+        el.querySelectorAll('.btn-edit').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openEdit(list.find((v) => String(v.id) === btn.dataset.id));
+          });
+        });
+        el.querySelectorAll('.btn-deact').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const ok = await confirm({
+              title: 'Deactivate venue',
+              message: 'This venue will no longer be available for booking. Continue?',
+              confirmLabel: 'Deactivate',
+              danger: true,
+            });
+            if (!ok) return;
+            try {
+              await deactivateVenue(btn.dataset.id);
+            } catch {
+              toast('Backend not connected yet. Request not sent.', 'error');
+            }
+          });
+        });
+      } catch {
+        dataTable({
+          container: el,
+          columns: [],
+          rows: [],
+          empty: { title: 'No venues have been added yet.' },
+        });
+        toast('Unable to load venues. Backend not connected yet.', 'error');
+      }
+    }
+
+    async function openEdit(venue) {
+      const isNew = !venue;
+      const data = await formModal({
+        title: isNew ? 'Add venue' : 'Edit venue',
+        submitLabel: isNew ? 'Create' : 'Save',
+        wide: true,
+        bodyHtml: `
+          <div class="space-y-3">
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Venue name</label>
+              <input name="name" value="${escapeHtml(venue?.name || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" required />
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Location</label>
+              <input name="location" value="${escapeHtml(venue?.location || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Capacity</label>
+              <input name="capacity" type="number" min="1" value="${escapeHtml(String(venue?.capacity ?? ''))}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Description</label>
+              <textarea name="description" rows="2" class="w-full border border-rule rounded-sm px-3 py-2 text-sm">${escapeHtml(venue?.description || '')}</textarea>
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Available equipment</label>
+              <input name="equipment" value="${escapeHtml(Array.isArray(venue?.equipment) ? venue.equipment.join(', ') : venue?.equipment || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" placeholder="Projector, whiteboard…" />
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Status</label>
+              <select name="status" class="w-full border border-rule rounded-sm px-3 py-2 text-sm">
+                <option ${venue?.status !== 'Inactive' ? 'selected' : ''}>Available</option>
+                <option ${venue?.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+              </select>
+            </div>
+          </div>
+        `,
+      });
+      if (!data) return;
+      try {
+        if (isNew) await createVenue(data);
+        else await updateVenue(venue.id, data);
+      } catch {
+        toast('Backend not connected yet. Request not sent.', 'error');
+      }
+    }
+
+    window.__pageInit = async function () {
+      document.getElementById('btn-add-venue').addEventListener('click', () => openEdit(null));
+      await load();
+    };
+  </script>
+</body>
+</html>

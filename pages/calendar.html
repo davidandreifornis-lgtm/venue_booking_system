@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendar — Venue Booking</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Fraunces', 'Georgia', 'serif'],
+            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            paper: '#faf8f5',
+            ink: '#1a1815',
+            muted: '#6b6560',
+            rule: '#e8e4dd',
+            accent: '#3d6b66',
+            'accent-soft': '#e6efee',
+            clay: '#b5623f',
+          },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: {
+            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url('/assets/noise.svg');
+      background-repeat: repeat;
+    }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Calendar">
+  <div id="app">
+    <!-- Filters -->
+    <div class="flex flex-wrap items-end gap-3 mb-6 pb-5 border-b border-rule">
+      <div>
+        <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Venue</label>
+        <select id="filter-venue" class="border border-rule rounded-sm px-2 py-1.5 text-sm bg-paper min-w-[140px]">
+          <option value="">All venues</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Department</label>
+        <select id="filter-dept" class="border border-rule rounded-sm px-2 py-1.5 text-sm bg-paper min-w-[140px]">
+          <option value="">All departments</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Status</label>
+        <select id="filter-status" class="border border-rule rounded-sm px-2 py-1.5 text-sm bg-paper min-w-[140px]">
+          <option value="">All</option>
+          <option>Approved</option>
+          <option>Rescheduled</option>
+          <option>Pending Manager Validation</option>
+          <option>Manager Validated</option>
+          <option>Pending HR Decision</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2 ml-auto">
+        <button type="button" id="prev-week" class="p-1.5 border border-rule rounded-sm text-muted hover:text-ink" aria-label="Previous week">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <span id="week-label" class="text-sm font-medium min-w-[140px] text-center"></span>
+        <button type="button" id="next-week" class="p-1.5 border border-rule rounded-sm text-muted hover:text-ink" aria-label="Next week">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="flex flex-wrap gap-4 mb-4 text-xs text-muted">
+      <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-accent"></span> Approved</span>
+      <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-clay"></span> Rescheduled</span>
+      <span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm border border-dashed border-rule"></span> Pending</span>
+    </div>
+
+    <div id="calendar-desktop" class="hidden lg:block"></div>
+    <div id="calendar-mobile" class="lg:hidden"></div>
+  </div>
+
+  <script type="module">
+    import '../js/app.js';
+    import { getBookings, getVenues, getDepartments } from '../js/api.js';
+    import { renderWeekGrid, renderDayList, startOfWeek } from '../js/calendar.js';
+    import { openModal } from '../components/modal.js';
+    import { formatDate, formatTime, escapeHtml } from '../js/utils.js';
+    import { statusBadge } from '../components/status-badge.js';
+    import { toast } from '../components/toast.js';
+
+    let weekStart = startOfWeek(new Date());
+    let events = [];
+
+    function updateLabel() {
+      const end = new Date(weekStart);
+      end.setDate(end.getDate() + 6);
+      document.getElementById('week-label').textContent =
+        `${formatDate(weekStart, { month: 'short', day: 'numeric' })} – ${formatDate(end, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    }
+
+    function onEventClick(ev) {
+      openModal({
+        title: ev.purpose || 'Booking',
+        bodyHtml: `
+          <dl class="space-y-3 text-sm">
+            <div><dt class="text-[11px] uppercase tracking-[0.08em] text-muted">Venue</dt><dd class="mt-0.5">${escapeHtml(ev.venueName || ev.venue || '—')}</dd></div>
+            <div><dt class="text-[11px] uppercase tracking-[0.08em] text-muted">Date</dt><dd class="mt-0.5">${formatDate(ev.date)}</dd></div>
+            <div><dt class="text-[11px] uppercase tracking-[0.08em] text-muted">Time</dt><dd class="mt-0.5">${formatTime(ev.startTime)} – ${formatTime(ev.endTime)}</dd></div>
+            <div><dt class="text-[11px] uppercase tracking-[0.08em] text-muted">Status</dt><dd class="mt-0.5">${statusBadge(ev.status)}</dd></div>
+            <div><dt class="text-[11px] uppercase tracking-[0.08em] text-muted">Requester</dt><dd class="mt-0.5">${escapeHtml(ev.requesterName || ev.requester || '—')}</dd></div>
+          </dl>
+          <p class="mt-4"><a href="/pages/booking-details.html?id=${encodeURIComponent(ev.id)}" class="text-sm text-accent hover:underline">View full details</a></p>
+        `,
+        footerHtml: `<button type="button" data-modal-close class="px-3 py-1.5 text-sm border border-rule rounded-sm">Close</button>`,
+      });
+      document.querySelector('[data-modal-close]')?.addEventListener('click', () => {
+        document.querySelector('[data-modal-backdrop]')?.click();
+      });
+    }
+
+    function render() {
+      updateLabel();
+      const desktop = document.getElementById('calendar-desktop');
+      const mobile = document.getElementById('calendar-mobile');
+      renderWeekGrid(desktop, { events, weekStart, onEventClick });
+      renderDayList(mobile, { events, onEventClick });
+    }
+
+    async function loadEvents() {
+      const venueId = document.getElementById('filter-venue').value;
+      const dept = document.getElementById('filter-dept').value;
+      const status = document.getElementById('filter-status').value;
+      try {
+        const params = {};
+        if (venueId) params.venueId = venueId;
+        if (dept) params.department = dept;
+        if (status) params.status = status;
+        const data = await getBookings(params);
+        events = Array.isArray(data) ? data : data?.items || [];
+      } catch {
+        events = [];
+        toast('Unable to load calendar. Backend not connected yet.', 'error');
+      }
+      render();
+    }
+
+    window.__pageInit = async function () {
+      try {
+        const venues = await getVenues();
+        const vlist = Array.isArray(venues) ? venues : venues?.items || [];
+        const vs = document.getElementById('filter-venue');
+        vlist.forEach((v) => {
+          const o = document.createElement('option');
+          o.value = v.id;
+          o.textContent = v.name;
+          vs.appendChild(o);
+        });
+      } catch {}
+
+      try {
+        const depts = await getDepartments();
+        const dlist = Array.isArray(depts) ? depts : depts?.items || [];
+        const ds = document.getElementById('filter-dept');
+        dlist.forEach((d) => {
+          const o = document.createElement('option');
+          o.value = d.name || d.id;
+          o.textContent = d.name;
+          ds.appendChild(o);
+        });
+      } catch {}
+
+      document.getElementById('prev-week').addEventListener('click', () => {
+        weekStart.setDate(weekStart.getDate() - 7);
+        weekStart = new Date(weekStart);
+        render();
+      });
+      document.getElementById('next-week').addEventListener('click', () => {
+        weekStart.setDate(weekStart.getDate() + 7);
+        weekStart = new Date(weekStart);
+        render();
+      });
+
+      ['filter-venue', 'filter-dept', 'filter-status'].forEach((id) => {
+        document.getElementById(id).addEventListener('change', loadEvents);
+      });
+
+      await loadEvents();
+    };
+  </script>
+</body>
+</html>

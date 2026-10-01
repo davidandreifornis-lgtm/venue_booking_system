@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Users — Venue Booking</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Fraunces', 'Georgia', 'serif'],
+            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            paper: '#faf8f5',
+            ink: '#1a1815',
+            muted: '#6b6560',
+            rule: '#e8e4dd',
+            accent: '#3d6b66',
+            'accent-soft': '#e6efee',
+            clay: '#b5623f',
+          },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: {
+            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url('/assets/noise.svg');
+      background-repeat: repeat;
+    }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Users">
+  <div id="app">
+    <div class="flex items-center justify-between mb-6">
+      <p class="text-sm text-muted">Manage system users and roles.</p>
+      <button type="button" id="btn-add-user" class="text-sm font-medium text-paper bg-ink px-4 py-2 rounded-sm hover:bg-ink/90">Add user</button>
+    </div>
+    <div id="users-table"></div>
+  </div>
+
+  <script type="module">
+    import '../js/app.js';
+    import { getUsers, createUser, updateUser, deactivateUser } from '../js/api.js';
+    import { dataTable } from '../components/data-table.js';
+    import { formModal, confirm } from '../components/modal.js';
+    import { toast } from '../components/toast.js';
+    import { escapeHtml } from '../js/utils.js';
+
+    async function load() {
+      const el = document.getElementById('users-table');
+      try {
+        const data = await getUsers();
+        const list = Array.isArray(data) ? data : data?.items || [];
+        dataTable({
+          container: el,
+          columns: [
+            { key: 'name', label: 'Name' },
+            { key: 'email', label: 'Email' },
+            { key: 'department', label: 'Department', render: (r) => r.department || r.departmentName || '—' },
+            { key: 'role', label: 'Role' },
+            { key: 'status', label: 'Status', render: (r) => r.status || (r.active === false ? 'Inactive' : 'Active') },
+            {
+              key: 'actions',
+              label: 'Actions',
+              sortable: false,
+              render: (r) => `
+                <button type="button" class="text-accent hover:underline text-sm mr-2 btn-edit" data-id="${escapeHtml(r.id)}">Edit</button>
+                <button type="button" class="text-clay hover:underline text-sm btn-deact" data-id="${escapeHtml(r.id)}">Deactivate</button>
+              `,
+            },
+          ],
+          rows: list,
+          empty: { title: 'No users found.' },
+        });
+
+        el.querySelectorAll('.btn-edit').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openEdit(list.find((u) => String(u.id) === btn.dataset.id));
+          });
+        });
+        el.querySelectorAll('.btn-deact').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const ok = await confirm({
+              title: 'Deactivate user',
+              message: 'This user will no longer be able to sign in. Continue?',
+              confirmLabel: 'Deactivate',
+              danger: true,
+            });
+            if (!ok) return;
+            try {
+              await deactivateUser(btn.dataset.id);
+            } catch {
+              toast('Backend not connected yet. Request not sent.', 'error');
+            }
+          });
+        });
+      } catch {
+        dataTable({ container: el, columns: [], rows: [], empty: { title: 'No users found.' } });
+        toast('Unable to load users. Backend not connected yet.', 'error');
+      }
+    }
+
+    async function openEdit(user) {
+      const isNew = !user;
+      const data = await formModal({
+        title: isNew ? 'Add user' : 'Edit user',
+        submitLabel: isNew ? 'Create' : 'Save',
+        bodyHtml: `
+          <div class="space-y-3">
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Name</label>
+              <input name="name" value="${escapeHtml(user?.name || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" required />
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Email</label>
+              <input name="email" type="email" value="${escapeHtml(user?.email || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" required />
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Department</label>
+              <input name="department" value="${escapeHtml(user?.department || user?.departmentName || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Role</label>
+              <select name="role" class="w-full border border-rule rounded-sm px-3 py-2 text-sm">
+                ${['Employee', 'Manager', 'HR', 'Administrator']
+                  .map((r) => `<option ${user?.role === r ? 'selected' : ''}>${r}</option>`)
+                  .join('')}
+              </select>
+            </div>
+          </div>
+        `,
+      });
+      if (!data) return;
+      try {
+        if (isNew) await createUser(data);
+        else await updateUser(user.id, data);
+      } catch {
+        toast('Backend not connected yet. Request not sent.', 'error');
+      }
+    }
+
+    window.__pageInit = async function () {
+      document.getElementById('btn-add-user').addEventListener('click', () => openEdit(null));
+      await load();
+    };
+  </script>
+</body>
+</html>

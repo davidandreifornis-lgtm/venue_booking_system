@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>All Bookings — Venue Booking</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Fraunces', 'Georgia', 'serif'],
+            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            paper: '#faf8f5',
+            ink: '#1a1815',
+            muted: '#6b6560',
+            rule: '#e8e4dd',
+            accent: '#3d6b66',
+            'accent-soft': '#e6efee',
+            clay: '#b5623f',
+          },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: {
+            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url('/assets/noise.svg');
+      background-repeat: repeat;
+    }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="All Bookings">
+  <div id="app">
+    <div class="flex flex-wrap gap-2 mb-6" id="status-filters">
+      <button type="button" data-status="" class="filter-chip px-3 py-1 text-xs uppercase tracking-[0.06em] border border-ink bg-ink text-paper rounded-sm">All</button>
+      <button type="button" data-status="Pending Manager Validation" class="filter-chip px-3 py-1 text-xs uppercase tracking-[0.06em] border border-rule text-muted rounded-sm hover:border-ink hover:text-ink">Pending Manager</button>
+      <button type="button" data-status="Pending HR Decision" class="filter-chip px-3 py-1 text-xs uppercase tracking-[0.06em] border border-rule text-muted rounded-sm hover:border-ink hover:text-ink">Pending HR</button>
+      <button type="button" data-status="Approved" class="filter-chip px-3 py-1 text-xs uppercase tracking-[0.06em] border border-rule text-muted rounded-sm hover:border-ink hover:text-ink">Approved</button>
+      <button type="button" data-status="Declined" class="filter-chip px-3 py-1 text-xs uppercase tracking-[0.06em] border border-rule text-muted rounded-sm hover:border-ink hover:text-ink">Declined</button>
+      <button type="button" data-status="Rescheduled" class="filter-chip px-3 py-1 text-xs uppercase tracking-[0.06em] border border-rule text-muted rounded-sm hover:border-ink hover:text-ink">Rescheduled</button>
+    </div>
+    <div id="bookings-table"></div>
+  </div>
+
+  <script type="module">
+    import '../js/app.js';
+    import { getBookings } from '../js/api.js';
+    import { dataTable } from '../components/data-table.js';
+    import { statusBadge } from '../components/status-badge.js';
+    import { formatDate } from '../js/utils.js';
+    import { toast } from '../components/toast.js';
+
+    let currentStatus = '';
+
+    async function load(status) {
+      const el = document.getElementById('bookings-table');
+      try {
+        const params = status ? { status } : {};
+        const data = await getBookings(params);
+        const list = Array.isArray(data) ? data : data?.items || [];
+        dataTable({
+          container: el,
+          columns: [
+            { key: 'ref', label: 'Reference', render: (r) => r.ref || r.id || '—' },
+            { key: 'requester', label: 'Requester', render: (r) => r.requesterName || r.requester || '—' },
+            { key: 'venue', label: 'Venue', render: (r) => r.venueName || r.venue || '—' },
+            { key: 'date', label: 'Date', render: (r) => formatDate(r.date) },
+            { key: 'status', label: 'Status', render: (r) => statusBadge(r.status), sortable: false },
+          ],
+          rows: list,
+          empty: { title: 'No booking requests found.' },
+          onRowClick: (row) => {
+            window.location.href = `/pages/booking-details.html?id=${encodeURIComponent(row.id)}`;
+          },
+        });
+      } catch {
+        dataTable({
+          container: el,
+          columns: [],
+          rows: [],
+          empty: { title: 'No booking requests found.' },
+        });
+        toast('Unable to load bookings. Backend not connected yet.', 'error');
+      }
+    }
+
+    window.__pageInit = async function () {
+      document.querySelectorAll('.filter-chip').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.filter-chip').forEach((b) => {
+            b.classList.remove('border-ink', 'bg-ink', 'text-paper');
+            b.classList.add('border-rule', 'text-muted');
+          });
+          btn.classList.add('border-ink', 'bg-ink', 'text-paper');
+          btn.classList.remove('border-rule', 'text-muted');
+          currentStatus = btn.getAttribute('data-status') || '';
+          load(currentStatus);
+        });
+      });
+      await load('');
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>New Booking Request — Venue Booking</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Fraunces', 'Georgia', 'serif'],
+            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            paper: '#faf8f5',
+            ink: '#1a1815',
+            muted: '#6b6560',
+            rule: '#e8e4dd',
+            accent: '#3d6b66',
+            'accent-soft': '#e6efee',
+            clay: '#b5623f',
+          },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: {
+            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url('/assets/noise.svg');
+      background-repeat: repeat;
+    }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="New Booking Request">
+  <div id="app">
+    <form id="booking-form" class="max-w-2xl space-y-6" novalidate>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div class="sm:col-span-2">
+          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Venue</label>
+          <select name="venueId" id="venueId" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30">
+            <option value="">Select venue…</option>
+          </select>
+          <p class="field-error text-xs text-clay mt-1 hidden" data-for="venueId"></p>
+        </div>
+
+        <div>
+          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Date</label>
+          <input type="date" name="date" id="date" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
+          <p class="field-error text-xs text-clay mt-1 hidden" data-for="date"></p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Start</label>
+            <input type="time" name="startTime" id="startTime" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
+            <p class="field-error text-xs text-clay mt-1 hidden" data-for="startTime"></p>
+          </div>
+          <div>
+            <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">End</label>
+            <input type="time" name="endTime" id="endTime" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
+            <p class="field-error text-xs text-clay mt-1 hidden" data-for="endTime"></p>
+          </div>
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Purpose</label>
+          <input type="text" name="purpose" id="purpose" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" placeholder="Brief purpose of the event" />
+          <p class="field-error text-xs text-clay mt-1 hidden" data-for="purpose"></p>
+        </div>
+
+        <div>
+          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Event Type</label>
+          <select name="eventType" id="eventType" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30">
+            <option value="">Select…</option>
+            <option>Meeting</option>
+            <option>Training</option>
+            <option>Conference</option>
+            <option>Workshop</option>
+            <option>Social</option>
+            <option>Other</option>
+          </select>
+          <p class="field-error text-xs text-clay mt-1 hidden" data-for="eventType"></p>
+        </div>
+
+        <div>
+          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Attendees</label>
+          <input type="number" name="attendees" id="attendees" min="1" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
+          <p class="field-error text-xs text-clay mt-1 hidden" data-for="attendees"></p>
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Department Manager</label>
+          <select name="departmentManagerId" id="departmentManagerId" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30">
+            <option value="">Select manager…</option>
+          </select>
+          <p class="field-error text-xs text-clay mt-1 hidden" data-for="departmentManagerId"></p>
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Additional Requirements</label>
+          <textarea name="additionalRequirements" id="additionalRequirements" rows="3" class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" placeholder="AV, catering, accessibility…"></textarea>
+        </div>
+      </div>
+
+      <div id="conflict-alert" class="hidden border border-clay/40 bg-clay/5 text-ink text-sm px-3 py-2.5 rounded-sm flex items-start gap-2">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="text-clay shrink-0 mt-0.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <span>This venue is already booked during the selected time.</span>
+      </div>
+
+      <div class="flex items-center gap-3 pt-2">
+        <button type="submit" id="submit-btn" class="bg-ink text-paper text-sm font-medium px-5 py-2.5 rounded-sm hover:bg-ink/90 transition-colors duration-150 disabled:opacity-50">
+          Submit Request
+        </button>
+        <a href="/pages/my-requests.html" class="text-sm text-muted hover:text-ink">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <script type="module">
+    import '../js/app.js';
+    import { getVenues, getUsers, getBookings, createBooking } from '../js/api.js';
+    import { validateBookingForm, hasVenueConflict } from '../js/validators.js';
+    import { toast } from '../components/toast.js';
+
+    let existingBookings = [];
+
+    window.__pageInit = async function () {
+      const venueSel = document.getElementById('venueId');
+      const mgrSel = document.getElementById('departmentManagerId');
+
+      try {
+        const venues = await getVenues({ status: 'Available' });
+        const vlist = Array.isArray(venues) ? venues : venues?.items || [];
+        vlist.forEach((v) => {
+          const opt = document.createElement('option');
+          opt.value = v.id;
+          opt.textContent = `${v.name}${v.capacity ? ` (cap. ${v.capacity})` : ''}`;
+          venueSel.appendChild(opt);
+        });
+      } catch {
+        // leave empty — backend not connected
+      }
+
+      try {
+        const users = await getUsers({ role: 'Manager' });
+        const ulist = Array.isArray(users) ? users : users?.items || [];
+        ulist.forEach((u) => {
+          const opt = document.createElement('option');
+          opt.value = u.id;
+          opt.textContent = u.name || u.email;
+          mgrSel.appendChild(opt);
+        });
+      } catch {
+        // leave empty
+      }
+
+      try {
+        const bookings = await getBookings({ status: 'Approved,Rescheduled' });
+        existingBookings = Array.isArray(bookings) ? bookings : bookings?.items || [];
+      } catch {
+        existingBookings = [];
+      }
+
+      const form = document.getElementById('booking-form');
+      const conflictAlert = document.getElementById('conflict-alert');
+
+      function checkConflict() {
+        const proposed = {
+          venueId: form.venueId.value,
+          date: form.date.value,
+          startTime: form.startTime.value,
+          endTime: form.endTime.value,
+        };
+        const conflict = hasVenueConflict(proposed, existingBookings);
+        conflictAlert.classList.toggle('hidden', !conflict);
+        return conflict;
+      }
+
+      ['venueId', 'date', 'startTime', 'endTime'].forEach((id) => {
+        form[id]?.addEventListener('change', checkConflict);
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        document.querySelectorAll('.field-error').forEach((el) => {
+          el.classList.add('hidden');
+          el.textContent = '';
+        });
+
+        const fields = {
+          venueId: form.venueId.value,
+          date: form.date.value,
+          startTime: form.startTime.value,
+          endTime: form.endTime.value,
+          purpose: form.purpose.value.trim(),
+          eventType: form.eventType.value,
+          attendees: form.attendees.value,
+          departmentManagerId: form.departmentManagerId.value,
+          additionalRequirements: form.additionalRequirements.value.trim(),
+        };
+
+        const errors = validateBookingForm(fields);
+        if (Object.keys(errors).length) {
+          for (const [k, msg] of Object.entries(errors)) {
+            const el = document.querySelector(`.field-error[data-for="${k}"]`);
+            if (el) {
+              el.textContent = msg;
+              el.classList.remove('hidden');
+            }
+          }
+          return;
+        }
+
+        if (checkConflict()) return;
+
+        const btn = document.getElementById('submit-btn');
+        btn.disabled = true;
+        btn.textContent = 'Submitting…';
+
+        try {
+          await createBooking(fields);
+          toast('Request submitted.', 'success');
+          window.location.href = '/pages/my-requests.html';
+        } catch {
+          toast('Backend not connected yet. Request not sent.', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Submit Request';
+        }
+      });
+    };
+  </script>
+</body>
+</html>
