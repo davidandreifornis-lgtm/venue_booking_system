@@ -1,27 +1,21 @@
 <?php
 /**
- * SQL Server — VenueBooking (Navicat / VMAPPS2)
- * Same connection shape as toner_inventory database.php
+ * App config (session, security, CORS, debug).
+ * Database credentials live only in database.php.
  */
 return [
-    'db' => [
-        'driver'   => 'sqlsrv',
-        'server'   => 'VMAPPS2',
-        'database' => 'VenueBooking',
-        'username' => 'sa_dev',
-        'password' => 'D3fault',
-        'port'     => '',
-    ],
     'session' => [
         'name' => 'VBSSESSID',
-        'lifetime_seconds' => 28800,
-        'idle_timeout_seconds' => 3600,
+        'lifetime_seconds' => 28800,       // 8 hours absolute
+        'idle_timeout_seconds' => 3600,    // 1 hour idle
     ],
     'security' => [
         'max_failed_logins' => 5,
         'lockout_minutes' => 15,
     ],
     'cors' => [
+        // Leave empty for same-origin only (recommended).
+        // Set e.g. 'http://localhost:8080' only if frontend is on a different origin.
         'allowed_origin' => '',
     ],
     'app' => [

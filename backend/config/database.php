@@ -1,7 +1,7 @@
 <?php
 /**
- * SQL Server — VenueBooking database (Navicat / VMAPPS2)
- * Same format as toner_inventory config/database.php
+ * SQL Server connection — single source of truth.
+ * Used by Database::config() / Database::pdo().
  */
 return [
     'driver'   => 'sqlsrv',

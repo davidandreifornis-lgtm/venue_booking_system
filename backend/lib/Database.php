@@ -1,7 +1,7 @@
 <?php
 /**
- * Build PDO connection to SQL Server database VenueBooking.
- * Pattern matches the working toner_inventory toner_pdo() helper.
+ * PDO connection to SQL Server (VenueBooking).
+ * Credentials: backend/config/database.php
  */
 
 class Database
@@ -10,13 +10,11 @@ class Database
 
     public static function config(): array
     {
-        // Prefer flat database.php (toner style); fall back to config.php['db']
-        $flat = __DIR__ . '/../config/database.php';
-        if (is_file($flat)) {
-            return require $flat;
+        $path = __DIR__ . '/../config/database.php';
+        if (!is_file($path)) {
+            throw new RuntimeException('Missing backend/config/database.php');
         }
-        $cfg = require __DIR__ . '/../config/config.php';
-        return $cfg['db'] ?? [];
+        return require $path;
     }
 
     public static function pdo(): PDO
@@ -38,7 +36,7 @@ class Database
             $database = 'VenueBooking';
         }
 
-        if (!in_array('sqlsrv', PDO::getAvailableDrivers(), true) && $driver === 'sqlsrv') {
+        if ($driver === 'sqlsrv' && !in_array('sqlsrv', PDO::getAvailableDrivers(), true)) {
             throw new RuntimeException(
                 'PDO sqlsrv driver missing. Enable php_pdo_sqlsrv in php.ini and install ODBC Driver for SQL Server.'
             );
@@ -67,7 +65,7 @@ class Database
             );
         }
 
-        // Confirm we are on the right database
+        // Confirm we landed on the expected database
         try {
             $row = self::$pdo->query('SELECT DB_NAME() AS dbname')->fetch(PDO::FETCH_ASSOC);
             $row = array_change_key_case($row ?: [], CASE_LOWER);
@@ -80,7 +78,7 @@ class Database
         } catch (RuntimeException $e) {
             throw $e;
         } catch (Throwable $e) {
-            // ignore if DB_NAME not allowed
+            // ignore if DB_NAME() not permitted
         }
 
         return self::$pdo;
