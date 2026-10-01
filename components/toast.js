@@ -1,5 +1,5 @@
 /**
- * Transient stacked toasts, top-right.
+ * Standard toast notifications — top-right stack.
  */
 
 let root = null;
@@ -15,29 +15,27 @@ function ensureRoot() {
 
 export function toast(message, type = 'info', duration = 4200) {
   const el = document.createElement('div');
-  const border =
-    type === 'error' ? 'border-clay/35 bg-paper text-ink' :
-    type === 'success' ? 'border-accent/30 bg-paper text-ink' :
-    'border-rule bg-paper text-ink';
-
-  const accentBar =
+  const bar =
     type === 'error' ? 'bg-clay' :
     type === 'success' ? 'bg-accent' :
     'bg-rule';
 
-  el.className = `pointer-events-auto w-full max-w-sm border ${border} shadow-card rounded-sm overflow-hidden transition-opacity duration-200 opacity-0 flex`;
+  el.className =
+    'pointer-events-auto w-full max-w-sm rounded border border-rule bg-paper shadow-card overflow-hidden flex transition-opacity duration-200 opacity-0';
   el.innerHTML = `
-    <div class="w-[3px] shrink-0 ${accentBar}"></div>
-    <div class="flex-1 px-4 py-3.5 flex items-start gap-3">
-      <span class="flex-1 text-[13px] leading-snug text-ink">${escape(message)}</span>
-      <button type="button" class="text-muted hover:text-ink shrink-0 -mt-0.5 p-0.5" aria-label="Dismiss">
+    <div class="w-[3px] shrink-0 ${bar}"></div>
+    <div class="flex-1 px-4 py-3 flex items-start gap-3">
+      <span class="flex-1 text-sm leading-snug text-ink">${escape(message)}</span>
+      <button type="button" class="text-muted hover:text-ink shrink-0 p-0.5" aria-label="Dismiss">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
   `;
 
   ensureRoot().appendChild(el);
-  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  requestAnimationFrame(() => {
+    el.style.opacity = '1';
+  });
 
   const remove = () => {
     el.style.opacity = '0';

@@ -13,128 +13,75 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: {
-            display: ['Fraunces', 'Georgia', 'serif'],
-            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
-          },
-          colors: {
-            paper: '#faf8f5',
-            ink: '#1a1815',
-            muted: '#6b6560',
-            rule: '#e8e4dd',
-            accent: '#3d6b66',
-            'accent-soft': '#e6efee',
-            clay: '#b5623f',
-          },
+          fontFamily: { display: ['Fraunces', 'Georgia', 'serif'], sans: ['"Inter Tight"', 'system-ui', 'sans-serif'] },
+          colors: { paper: '#faf8f5', ink: '#1a1815', muted: '#6b6560', rule: '#e8e4dd', accent: '#3d6b66', 'accent-soft': '#e6efee', clay: '#b5623f' },
           borderRadius: { DEFAULT: '4px', sm: '2px' },
-          boxShadow: {
-            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
-          },
+          boxShadow: { card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)' },
         },
       },
     };
   </script>
-  <style>
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 9999;
-      opacity: 0.03;
-      background-image: url('/assets/noise.svg');
-      background-repeat: repeat;
-    }
-  </style>
+  <style>body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url('/assets/noise.svg');background-repeat:repeat}</style>
 </head>
-<body class="bg-paper text-ink font-sans antialiased" data-page-title="Admin Dashboard" data-page-subtitle="System overview">
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Admin Dashboard">
   <div id="app">
-    <div class="mb-8 sm:mb-10 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-      <div>
-        <p class="text-[11px] uppercase tracking-[0.12em] text-muted mb-2">Overview</p>
-        <p class="text-[15px] text-muted max-w-lg leading-relaxed">Users, departments, venues, and system activity at a glance.</p>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <a href="/pages/users.html" class="text-[12px] font-medium border border-rule px-3 py-2 rounded-sm hover:bg-rule/30 transition-colors duration-150">Users</a>
-        <a href="/pages/venues.html" class="text-[12px] font-medium border border-rule px-3 py-2 rounded-sm hover:bg-rule/30 transition-colors duration-150">Venues</a>
-        <a href="/pages/departments.html" class="text-[12px] font-medium border border-rule px-3 py-2 rounded-sm hover:bg-rule/30 transition-colors duration-150">Departments</a>
-      </div>
-    </div>
-
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-12">
-      <div class="border border-rule rounded-sm bg-paper p-5 shadow-card relative overflow-hidden">
-        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-ink/30"></div>
-        <p class="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">Users</p>
-        <p id="card-users" class="mt-3 font-display text-[2rem] font-medium tracking-[-0.04em] text-ink leading-none">0</p>
-      </div>
-      <div class="border border-rule rounded-sm bg-paper p-5 shadow-card relative overflow-hidden">
-        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-ink/30"></div>
-        <p class="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">Departments</p>
-        <p id="card-depts" class="mt-3 font-display text-[2rem] font-medium tracking-[-0.04em] text-ink leading-none">0</p>
-      </div>
-      <div class="border border-rule rounded-sm bg-paper p-5 shadow-card relative overflow-hidden">
-        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent"></div>
-        <p class="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">Venues</p>
-        <p id="card-venues" class="mt-3 font-display text-[2rem] font-medium tracking-[-0.04em] text-ink leading-none">0</p>
-      </div>
-      <div class="border border-rule rounded-sm bg-paper p-5 shadow-card relative overflow-hidden">
-        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent"></div>
-        <p class="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">Active bookings</p>
-        <p id="card-bookings" class="mt-3 font-display text-[2rem] font-medium tracking-[-0.04em] text-ink leading-none">0</p>
-      </div>
-    </div>
-
-    <section>
-      <div class="flex items-baseline justify-between gap-4 mb-5 pb-3 border-b border-rule">
-        <h2 class="font-display text-lg sm:text-xl font-medium tracking-[-0.025em]">Recent system activity</h2>
-        <a href="/pages/activity-logs.html" class="text-[12px] text-accent hover:text-accent/80 tracking-wide font-medium transition-colors duration-150 shrink-0">View all</a>
-      </div>
+    <div id="page-header"></div>
+    <div id="stat-grid" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-10"></div>
+    <section class="mb-10">
+      <div id="sec-act-h"></div>
       <div id="activity-list"></div>
     </section>
   </div>
-
   <script type="module">
     import '../js/app.js';
     import { getUsers, getDepartments, getVenues, getBookings, getActivityLogs } from '../js/api.js';
+    import { ui, pageHeader, statCard, sectionHeader } from '../js/ui.js';
     import { emptyState } from '../components/empty-state.js';
 
     window.__pageInit = async function () {
-      const activityEl = document.getElementById('activity-list');
+      document.getElementById('page-header').innerHTML = pageHeader({
+        description: 'Users, departments, venues, and system activity at a glance.',
+        actionsHtml: `
+          <a href="/pages/users.html" class="${ui.btnSecondary}">Users</a>
+          <a href="/pages/venues.html" class="${ui.btnSecondary}">Venues</a>
+          <a href="/pages/departments.html" class="${ui.btnSecondary}">Departments</a>
+        `,
+      });
+      document.getElementById('stat-grid').innerHTML = [
+        statCard({ label: 'Total users', valueId: 'card-users', accent: 'ink' }),
+        statCard({ label: 'Departments', valueId: 'card-depts', accent: 'ink' }),
+        statCard({ label: 'Venues', valueId: 'card-venues', accent: 'accent' }),
+        statCard({ label: 'Active bookings', valueId: 'card-bookings', accent: 'accent' }),
+      ].join('');
+      document.getElementById('sec-act-h').innerHTML = sectionHeader({ title: 'Recent system activity', href: '/pages/activity-logs.html' });
 
       async function safeCount(fn) {
         try {
           const data = await fn();
           const list = Array.isArray(data) ? data : data?.items || [];
           return list.length;
-        } catch {
-          return 0;
-        }
+        } catch { return 0; }
       }
 
       document.getElementById('card-users').textContent = String(await safeCount(() => getUsers()));
       document.getElementById('card-depts').textContent = String(await safeCount(() => getDepartments()));
       document.getElementById('card-venues').textContent = String(await safeCount(() => getVenues()));
-      document.getElementById('card-bookings').textContent = String(
-        await safeCount(() => getBookings({ status: 'Approved' }))
-      );
+      document.getElementById('card-bookings').textContent = String(await safeCount(() => getBookings({ status: 'Approved' })));
 
+      const activityEl = document.getElementById('activity-list');
       try {
         const logs = await getActivityLogs({ limit: 10 });
         const list = Array.isArray(logs) ? logs : logs?.items || [];
         if (!list.length) {
           activityEl.innerHTML = emptyState({ title: 'No activity recorded.' });
         } else {
-          activityEl.innerHTML = list
-            .map(
-              (l) => `
-            <div class="border-b border-rule py-3.5 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
-              <span class="text-muted text-[11px] whitespace-nowrap tracking-wide">${l.timestamp || '—'}</span>
+          activityEl.innerHTML = `<div class="${ui.panel} divide-y divide-rule">${list.map((l) => `
+            <div class="px-4 sm:px-5 py-3.5 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <span class="text-xs text-muted whitespace-nowrap">${l.timestamp || '—'}</span>
               <span class="font-medium text-ink">${l.actor || '—'}</span>
               <span class="text-muted">${l.action || ''}</span>
               <span class="text-muted truncate">${l.target || ''}</span>
-            </div>`
-            )
-            .join('');
+            </div>`).join('')}</div>`;
         }
       } catch {
         activityEl.innerHTML = emptyState({ title: 'No activity recorded.' });

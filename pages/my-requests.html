@@ -13,58 +13,35 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: {
-            display: ['Fraunces', 'Georgia', 'serif'],
-            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
-          },
-          colors: {
-            paper: '#faf8f5',
-            ink: '#1a1815',
-            muted: '#6b6560',
-            rule: '#e8e4dd',
-            accent: '#3d6b66',
-            'accent-soft': '#e6efee',
-            clay: '#b5623f',
-          },
+          fontFamily: { display: ['Fraunces', 'Georgia', 'serif'], sans: ['"Inter Tight"', 'system-ui', 'sans-serif'] },
+          colors: { paper: '#faf8f5', ink: '#1a1815', muted: '#6b6560', rule: '#e8e4dd', accent: '#3d6b66', 'accent-soft': '#e6efee', clay: '#b5623f' },
           borderRadius: { DEFAULT: '4px', sm: '2px' },
-          boxShadow: {
-            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
-          },
+          boxShadow: { card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)' },
         },
       },
     };
   </script>
-  <style>
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 9999;
-      opacity: 0.03;
-      background-image: url('/assets/noise.svg');
-      background-repeat: repeat;
-    }
-  </style>
+  <style>body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url('/assets/noise.svg');background-repeat:repeat}</style>
 </head>
 <body class="bg-paper text-ink font-sans antialiased" data-page-title="My Requests">
   <div id="app">
-    <div class="flex items-center justify-between mb-6">
-      <p class="text-sm text-muted">Your booking requests and their current status.</p>
-      <a href="/pages/booking-form.html" class="text-sm font-medium text-accent hover:underline">New request</a>
-    </div>
+    <div id="page-header"></div>
     <div id="requests-table"></div>
   </div>
-
   <script type="module">
     import '../js/app.js';
     import { getBookings } from '../js/api.js';
+    import { ui, pageHeader } from '../js/ui.js';
     import { dataTable } from '../components/data-table.js';
     import { statusBadge } from '../components/status-badge.js';
     import { formatDate, formatTime } from '../js/utils.js';
     import { toast } from '../components/toast.js';
 
     window.__pageInit = async function () {
+      document.getElementById('page-header').innerHTML = pageHeader({
+        description: 'Track and manage your venue booking requests.',
+        actionsHtml: `<a href="/pages/booking-form.html" class="${ui.btnPrimary}">New request</a>`,
+      });
       const el = document.getElementById('requests-table');
       try {
         const data = await getBookings({ scope: 'mine' });
@@ -79,28 +56,11 @@
             { key: 'status', label: 'Status', render: (r) => statusBadge(r.status), sortable: false },
           ],
           rows: list,
-          empty: {
-            title: 'No booking requests found.',
-            hint: 'Submit a request to reserve a venue.',
-            actionLabel: 'New request',
-            actionHref: '/pages/booking-form.html',
-          },
-          onRowClick: (row) => {
-            window.location.href = `/pages/booking-details.html?id=${encodeURIComponent(row.id)}`;
-          },
+          empty: { title: 'No booking requests found.', hint: 'Submit a request to reserve a venue.', actionLabel: 'New request', actionHref: '/pages/booking-form.html' },
+          onRowClick: (row) => { window.location.href = `/pages/booking-details.html?id=${encodeURIComponent(row.id)}`; },
         });
       } catch {
-        dataTable({
-          container: el,
-          columns: [],
-          rows: [],
-          empty: {
-            title: 'No booking requests found.',
-            hint: 'Submit a request to reserve a venue.',
-            actionLabel: 'New request',
-            actionHref: '/pages/booking-form.html',
-          },
-        });
+        dataTable({ container: el, columns: [], rows: [], empty: { title: 'No booking requests found.', hint: 'Submit a request to reserve a venue.', actionLabel: 'New request', actionHref: '/pages/booking-form.html' } });
         toast('Unable to load requests. Backend not connected yet.', 'error');
       }
     };

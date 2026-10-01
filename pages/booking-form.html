@@ -13,80 +13,53 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: {
-            display: ['Fraunces', 'Georgia', 'serif'],
-            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
-          },
-          colors: {
-            paper: '#faf8f5',
-            ink: '#1a1815',
-            muted: '#6b6560',
-            rule: '#e8e4dd',
-            accent: '#3d6b66',
-            'accent-soft': '#e6efee',
-            clay: '#b5623f',
-          },
+          fontFamily: { display: ['Fraunces', 'Georgia', 'serif'], sans: ['"Inter Tight"', 'system-ui', 'sans-serif'] },
+          colors: { paper: '#faf8f5', ink: '#1a1815', muted: '#6b6560', rule: '#e8e4dd', accent: '#3d6b66', 'accent-soft': '#e6efee', clay: '#b5623f' },
           borderRadius: { DEFAULT: '4px', sm: '2px' },
-          boxShadow: {
-            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
-          },
+          boxShadow: { card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)' },
         },
       },
     };
   </script>
-  <style>
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 9999;
-      opacity: 0.03;
-      background-image: url('/assets/noise.svg');
-      background-repeat: repeat;
-    }
-  </style>
+  <style>body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url('/assets/noise.svg');background-repeat:repeat}</style>
 </head>
 <body class="bg-paper text-ink font-sans antialiased" data-page-title="New Booking Request">
   <div id="app">
-    <form id="booking-form" class="max-w-2xl space-y-6" novalidate>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+    <div id="page-header"></div>
+    <form id="booking-form" class="max-w-2xl" novalidate>
+      <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <div class="sm:col-span-2">
-          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Venue</label>
-          <select name="venueId" id="venueId" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30">
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="venueId">Venue</label>
+          <select name="venueId" id="venueId" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10">
             <option value="">Select venue…</option>
           </select>
-          <p class="field-error text-xs text-clay mt-1 hidden" data-for="venueId"></p>
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="venueId"></p>
         </div>
-
         <div>
-          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Date</label>
-          <input type="date" name="date" id="date" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
-          <p class="field-error text-xs text-clay mt-1 hidden" data-for="date"></p>
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="date">Date</label>
+          <input type="date" name="date" id="date" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="date"></p>
         </div>
-
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Start</label>
-            <input type="time" name="startTime" id="startTime" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
-            <p class="field-error text-xs text-clay mt-1 hidden" data-for="startTime"></p>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="startTime">Start</label>
+            <input type="time" name="startTime" id="startTime" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+            <p class="field-error mt-1 text-xs text-clay hidden" data-for="startTime"></p>
           </div>
           <div>
-            <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">End</label>
-            <input type="time" name="endTime" id="endTime" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
-            <p class="field-error text-xs text-clay mt-1 hidden" data-for="endTime"></p>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="endTime">End</label>
+            <input type="time" name="endTime" id="endTime" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+            <p class="field-error mt-1 text-xs text-clay hidden" data-for="endTime"></p>
           </div>
         </div>
-
         <div class="sm:col-span-2">
-          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Purpose</label>
-          <input type="text" name="purpose" id="purpose" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" placeholder="Brief purpose of the event" />
-          <p class="field-error text-xs text-clay mt-1 hidden" data-for="purpose"></p>
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="purpose">Purpose</label>
+          <input type="text" name="purpose" id="purpose" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" placeholder="Brief purpose of the event" />
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="purpose"></p>
         </div>
-
         <div>
-          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Event Type</label>
-          <select name="eventType" id="eventType" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30">
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="eventType">Event type</label>
+          <select name="eventType" id="eventType" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10">
             <option value="">Select…</option>
             <option>Meeting</option>
             <option>Training</option>
@@ -95,52 +68,51 @@
             <option>Social</option>
             <option>Other</option>
           </select>
-          <p class="field-error text-xs text-clay mt-1 hidden" data-for="eventType"></p>
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="eventType"></p>
         </div>
-
         <div>
-          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Attendees</label>
-          <input type="number" name="attendees" id="attendees" min="1" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" />
-          <p class="field-error text-xs text-clay mt-1 hidden" data-for="attendees"></p>
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="attendees">Attendees</label>
+          <input type="number" name="attendees" id="attendees" min="1" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="attendees"></p>
         </div>
-
         <div class="sm:col-span-2">
-          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Department Manager</label>
-          <select name="departmentManagerId" id="departmentManagerId" required class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30">
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="departmentManagerId">Department manager</label>
+          <select name="departmentManagerId" id="departmentManagerId" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10">
             <option value="">Select manager…</option>
           </select>
-          <p class="field-error text-xs text-clay mt-1 hidden" data-for="departmentManagerId"></p>
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="departmentManagerId"></p>
         </div>
-
         <div class="sm:col-span-2">
-          <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Additional Requirements</label>
-          <textarea name="additionalRequirements" id="additionalRequirements" rows="3" class="w-full border border-rule rounded-sm px-3 py-2.5 text-sm bg-paper focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30" placeholder="AV, catering, accessibility…"></textarea>
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="additionalRequirements">Additional requirements</label>
+          <textarea name="additionalRequirements" id="additionalRequirements" rows="3" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10 resize-y" placeholder="AV, catering, accessibility…"></textarea>
         </div>
       </div>
 
-      <div id="conflict-alert" class="hidden border border-clay/40 bg-clay/5 text-ink text-sm px-3 py-2.5 rounded-sm flex items-start gap-2">
+      <div id="conflict-alert" class="hidden mt-5 border border-clay/40 bg-clay/5 text-ink text-sm px-4 py-3 rounded flex items-start gap-2">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="text-clay shrink-0 mt-0.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
         <span>This venue is already booked during the selected time.</span>
       </div>
 
-      <div class="flex items-center gap-3 pt-2">
-        <button type="submit" id="submit-btn" class="bg-ink text-paper text-sm font-medium px-5 py-2.5 rounded-sm hover:bg-ink/90 transition-colors duration-150 disabled:opacity-50">
-          Submit Request
-        </button>
-        <a href="/pages/my-requests.html" class="text-sm text-muted hover:text-ink">Cancel</a>
+      <div class="flex items-center gap-3 mt-8 pt-6 border-t border-rule">
+        <button type="submit" id="submit-btn" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 disabled:opacity-50">Submit request</button>
+        <a href="/pages/my-requests.html" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-muted hover:text-ink hover:bg-rule/40 transition-colors duration-150">Cancel</a>
       </div>
     </form>
   </div>
-
   <script type="module">
     import '../js/app.js';
     import { getVenues, getUsers, getBookings, createBooking } from '../js/api.js';
+    import { pageHeader } from '../js/ui.js';
     import { validateBookingForm, hasVenueConflict } from '../js/validators.js';
     import { toast } from '../components/toast.js';
 
     let existingBookings = [];
 
     window.__pageInit = async function () {
+      document.getElementById('page-header').innerHTML = pageHeader({
+        description: 'Submit a venue booking request for manager validation and HR approval.',
+      });
+
       const venueSel = document.getElementById('venueId');
       const mgrSel = document.getElementById('departmentManagerId');
 
@@ -153,9 +125,7 @@
           opt.textContent = `${v.name}${v.capacity ? ` (cap. ${v.capacity})` : ''}`;
           venueSel.appendChild(opt);
         });
-      } catch {
-        // leave empty — backend not connected
-      }
+      } catch {}
 
       try {
         const users = await getUsers({ role: 'Manager' });
@@ -166,9 +136,7 @@
           opt.textContent = u.name || u.email;
           mgrSel.appendChild(opt);
         });
-      } catch {
-        // leave empty
-      }
+      } catch {}
 
       try {
         const bookings = await getBookings({ status: 'Approved,Rescheduled' });
@@ -226,13 +194,11 @@
           }
           return;
         }
-
         if (checkConflict()) return;
 
         const btn = document.getElementById('submit-btn');
         btn.disabled = true;
         btn.textContent = 'Submitting…';
-
         try {
           await createBooking(fields);
           toast('Request submitted.', 'success');
@@ -241,7 +207,7 @@
           toast('Backend not connected yet. Request not sent.', 'error');
         } finally {
           btn.disabled = false;
-          btn.textContent = 'Submit Request';
+          btn.textContent = 'Submit request';
         }
       });
     };

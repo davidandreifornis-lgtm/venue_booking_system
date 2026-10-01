@@ -1,5 +1,6 @@
 /**
  * Bootstrap: load session, inject shell, dispatch page init.
+ * Shell layout is fixed: sidebar 256px + header 56px + content max-w-7xl.
  */
 
 import { loadSession, isAuthed, role } from './auth.js';
@@ -44,7 +45,8 @@ function injectShell() {
 
   const backdrop = document.createElement('div');
   backdrop.id = 'sidebar-backdrop';
-  backdrop.className = 'fixed inset-0 bg-ink/50 z-40 lg:hidden opacity-0 pointer-events-none transition-opacity duration-200';
+  backdrop.className =
+    'fixed inset-0 bg-ink/50 z-40 lg:hidden opacity-0 pointer-events-none transition-opacity duration-200';
   backdrop.addEventListener('click', closeDrawer);
   document.body.appendChild(backdrop);
 
@@ -62,11 +64,15 @@ function injectShell() {
 
   const content = document.createElement('main');
   content.id = 'app-content';
-  content.className = 'flex-1 w-full px-4 sm:px-6 lg:px-8 py-7 sm:py-9 max-w-7xl';
+  content.className = 'flex-1 min-w-0 overflow-y-auto';
+
+  const inner = document.createElement('div');
+  inner.className = 'mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8';
 
   while (app.childNodes.length > 1) {
-    content.appendChild(app.childNodes[1]);
+    inner.appendChild(app.childNodes[1]);
   }
+  content.appendChild(inner);
   app.appendChild(content);
 
   renderSidebar(drawer);

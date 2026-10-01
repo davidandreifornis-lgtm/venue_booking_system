@@ -1,5 +1,6 @@
 /**
- * Role-aware navigation sidebar. Fixed on desktop, drawer on mobile.
+ * Application sidebar — identical chrome on every page; nav items by role.
+ * Width: 256px (w-64). Fixed on lg+, drawer below.
  */
 
 import { session, role, logout } from '../js/auth.js';
@@ -64,50 +65,43 @@ export function renderSidebar(container) {
   const links = items
     .map((item) => {
       const file = item.href.split('/').pop();
-      const active = path.endsWith(file) || path.includes(file.replace('.html', ''));
+      const active = path.endsWith(file);
       return `
         <a href="${item.href}"
-           class="group flex items-center gap-3 px-3 py-2.5 text-[13px] rounded-sm transition-colors duration-150
-           ${active
-             ? 'bg-white/[0.08] text-paper font-medium'
-             : 'text-paper/55 hover:text-paper hover:bg-white/[0.04]'}">
-          <span class="shrink-0 ${active ? 'text-paper' : 'text-paper/40 group-hover:text-paper/70'} transition-colors duration-150">${ICONS[item.icon] || ''}</span>
-          <span class="tracking-wide">${escapeHtml(item.label)}</span>
-          ${active ? '<span class="ml-auto w-1 h-1 rounded-full bg-accent"></span>' : ''}
+           class="group flex items-center gap-3 h-10 px-3 rounded text-sm transition-colors duration-150
+           ${active ? 'bg-white/[0.09] text-paper font-medium' : 'text-paper/55 hover:text-paper hover:bg-white/[0.05]'}">
+          <span class="shrink-0 w-[18px] h-[18px] ${active ? 'text-paper' : 'text-paper/40 group-hover:text-paper/65'}">${ICONS[item.icon] || ''}</span>
+          <span class="truncate">${escapeHtml(item.label)}</span>
         </a>
       `;
     })
     .join('');
 
   container.innerHTML = `
-    <div class="flex flex-col h-full">
-      <div class="px-5 pt-7 pb-6">
+    <div class="flex flex-col h-full w-64">
+      <div class="h-14 flex flex-col justify-center px-5 border-b border-white/[0.06] shrink-0">
         <a href="/" class="block">
-          <p class="font-display text-[22px] font-semibold tracking-[-0.035em] text-paper leading-none">Venue</p>
-          <p class="mt-1.5 text-[10px] uppercase tracking-[0.14em] text-paper/35 font-medium">Booking System</p>
+          <p class="font-display text-lg font-semibold tracking-[-0.03em] text-paper leading-none">Venue</p>
+          <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-paper/35">Booking System</p>
         </a>
       </div>
 
-      <div class="px-3 mb-2">
-        <p class="px-3 text-[10px] uppercase tracking-[0.12em] text-paper/30 mb-1.5">Navigation</p>
-      </div>
+      <nav class="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">${links}</nav>
 
-      <nav class="flex-1 px-3 space-y-0.5 overflow-y-auto pb-4">${links}</nav>
-
-      <div class="mt-auto border-t border-white/[0.06] px-3 py-4">
-        <div class="flex items-center gap-3 px-3 py-2.5 mb-1">
-          <div class="w-8 h-8 rounded-sm bg-white/10 flex items-center justify-center text-[11px] font-medium text-paper tracking-wide shrink-0">
+      <div class="border-t border-white/[0.06] px-3 py-3 shrink-0">
+        <div class="flex items-center gap-3 px-3 py-2">
+          <div class="w-8 h-8 rounded bg-white/10 flex items-center justify-center text-[11px] font-medium text-paper shrink-0">
             ${initials(user?.name)}
           </div>
           <div class="min-w-0 flex-1">
-            <p class="text-[13px] text-paper truncate leading-tight">${escapeHtml(user?.name || '—')}</p>
-            <p class="text-[10px] text-paper/35 uppercase tracking-[0.1em] mt-0.5">${escapeHtml(r)}</p>
+            <p class="text-sm text-paper truncate leading-tight">${escapeHtml(user?.name || '—')}</p>
+            <p class="text-[10px] text-paper/40 uppercase tracking-[0.08em] mt-0.5">${escapeHtml(r)}</p>
           </div>
         </div>
         <button type="button" id="sidebar-logout"
-          class="w-full flex items-center gap-3 px-3 py-2.5 text-[13px] text-paper/45 hover:text-paper hover:bg-white/[0.04] rounded-sm transition-colors duration-150">
+          class="w-full flex items-center gap-3 h-10 px-3 rounded text-sm text-paper/45 hover:text-paper hover:bg-white/[0.05] transition-colors duration-150 mt-1">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-          <span class="tracking-wide">Sign out</span>
+          <span>Sign out</span>
         </button>
       </div>
     </div>

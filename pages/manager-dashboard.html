@@ -13,92 +13,49 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: {
-            display: ['Fraunces', 'Georgia', 'serif'],
-            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
-          },
-          colors: {
-            paper: '#faf8f5',
-            ink: '#1a1815',
-            muted: '#6b6560',
-            rule: '#e8e4dd',
-            accent: '#3d6b66',
-            'accent-soft': '#e6efee',
-            clay: '#b5623f',
-          },
+          fontFamily: { display: ['Fraunces', 'Georgia', 'serif'], sans: ['"Inter Tight"', 'system-ui', 'sans-serif'] },
+          colors: { paper: '#faf8f5', ink: '#1a1815', muted: '#6b6560', rule: '#e8e4dd', accent: '#3d6b66', 'accent-soft': '#e6efee', clay: '#b5623f' },
           borderRadius: { DEFAULT: '4px', sm: '2px' },
-          boxShadow: {
-            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
-          },
+          boxShadow: { card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)' },
         },
       },
     };
   </script>
-  <style>
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 9999;
-      opacity: 0.03;
-      background-image: url('/assets/noise.svg');
-      background-repeat: repeat;
-    }
-  </style>
+  <style>body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url('/assets/noise.svg');background-repeat:repeat}</style>
 </head>
-<body class="bg-paper text-ink font-sans antialiased" data-page-title="Manager Dashboard" data-page-subtitle="Department validation queue">
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Manager Dashboard">
   <div id="app">
-    <div class="mb-8 sm:mb-10">
-      <p class="text-[11px] uppercase tracking-[0.12em] text-muted mb-2">Overview</p>
-      <p class="text-[15px] text-muted max-w-lg leading-relaxed">Review and validate booking requests from your department before they reach HR.</p>
-    </div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-12">
-      <div class="border border-rule rounded-sm bg-paper p-5 sm:p-6 shadow-card relative overflow-hidden">
-        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-clay/60"></div>
-        <p class="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">Awaiting validation</p>
-        <p id="card-awaiting" class="mt-3 font-display text-[2rem] font-medium tracking-[-0.04em] text-ink leading-none">0</p>
-        <p class="mt-2 text-[12px] text-muted">Needs your review</p>
-      </div>
-      <div class="border border-rule rounded-sm bg-paper p-5 sm:p-6 shadow-card relative overflow-hidden">
-        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent"></div>
-        <p class="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">Validated this week</p>
-        <p id="card-validated" class="mt-3 font-display text-[2rem] font-medium tracking-[-0.04em] text-ink leading-none">0</p>
-        <p class="mt-2 text-[12px] text-muted">Sent to HR</p>
-      </div>
-      <div class="border border-rule rounded-sm bg-paper p-5 sm:p-6 shadow-card relative overflow-hidden">
-        <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-ink/20"></div>
-        <p class="text-[10px] uppercase tracking-[0.12em] text-muted font-medium">Department upcoming</p>
-        <p id="card-upcoming" class="mt-3 font-display text-[2rem] font-medium tracking-[-0.04em] text-ink leading-none">0</p>
-        <p class="mt-2 text-[12px] text-muted">Approved events</p>
-      </div>
-    </div>
-
-    <section class="mb-14">
-      <div class="flex items-baseline justify-between gap-4 mb-5 pb-3 border-b border-rule">
-        <h2 class="font-display text-lg sm:text-xl font-medium tracking-[-0.025em]">Awaiting validation</h2>
-        <a href="/pages/pending-requests.html" class="text-[12px] text-accent hover:text-accent/80 tracking-wide font-medium transition-colors duration-150 shrink-0">View all</a>
-      </div>
+    <div id="page-header"></div>
+    <div id="stat-grid" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-10"></div>
+    <section class="mb-10">
+      <div id="sec-await-h"></div>
       <div id="awaiting-list"></div>
     </section>
-
-    <section>
-      <div class="flex items-baseline justify-between gap-4 mb-5 pb-3 border-b border-rule">
-        <h2 class="font-display text-lg sm:text-xl font-medium tracking-[-0.025em]">Recent activity</h2>
-      </div>
+    <section class="mb-10">
+      <div id="sec-act-h"></div>
       <div id="activity-list"></div>
     </section>
   </div>
-
   <script type="module">
     import '../js/app.js';
     import { getBookings } from '../js/api.js';
+    import { ui, pageHeader, statCard, sectionHeader } from '../js/ui.js';
     import { emptyState } from '../components/empty-state.js';
     import { statusBadge } from '../components/status-badge.js';
     import { formatDate } from '../js/utils.js';
 
     window.__pageInit = async function () {
+      document.getElementById('page-header').innerHTML = pageHeader({
+        description: 'Review and validate booking requests from your department before they reach HR.',
+      });
+      document.getElementById('stat-grid').innerHTML = [
+        statCard({ label: 'Awaiting validation', valueId: 'card-awaiting', hint: 'Needs your review', accent: 'clay' }),
+        statCard({ label: 'Validated this week', valueId: 'card-validated', hint: 'Sent to HR', accent: 'accent' }),
+        statCard({ label: 'Department upcoming', valueId: 'card-upcoming', hint: 'Approved events', accent: 'ink' }),
+      ].join('');
+      document.getElementById('sec-await-h').innerHTML = sectionHeader({ title: 'Awaiting validation', href: '/pages/pending-requests.html' });
+      document.getElementById('sec-act-h').innerHTML = sectionHeader({ title: 'Recent activity' });
+
       const awaitingEl = document.getElementById('awaiting-list');
       const activityEl = document.getElementById('activity-list');
 
@@ -108,38 +65,26 @@
         const awaiting = list.filter((b) => b.status === 'Pending Manager Validation');
         document.getElementById('card-awaiting').textContent = String(awaiting.length);
         document.getElementById('card-validated').textContent = '0';
-        document.getElementById('card-upcoming').textContent = String(
-          list.filter((b) => b.status === 'Approved' || b.status === 'Rescheduled').length
-        );
+        document.getElementById('card-upcoming').textContent = String(list.filter((b) => b.status === 'Approved' || b.status === 'Rescheduled').length);
 
         if (!awaiting.length) {
-          awaitingEl.innerHTML = emptyState({
-            title: 'No pending requests.',
-            hint: 'Requests from your department will appear here when submitted.',
-          });
+          awaitingEl.innerHTML = emptyState({ title: 'No pending requests.', hint: 'Requests from your department will appear here when submitted.' });
         } else {
-          awaitingEl.innerHTML = `<div class="space-y-2">${awaiting
-            .map(
-              (b) => `
-            <div class="border border-rule rounded-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3 bg-paper hover:shadow-card transition-shadow duration-150">
+          awaitingEl.innerHTML = `<div class="space-y-2">${awaiting.map((b) => `
+            <div class="${ui.card} p-4 flex flex-col sm:flex-row sm:items-center gap-3">
               <div class="flex-1 min-w-0">
-                <p class="text-[13px] font-medium text-ink truncate">${b.requesterName || b.requester || '—'} · ${b.venueName || b.venue || '—'}</p>
-                <p class="text-[12px] text-muted mt-1">${formatDate(b.date)} · ${b.purpose || ''}</p>
+                <p class="text-sm font-medium text-ink truncate">${b.requesterName || b.requester || '—'} · ${b.venueName || b.venue || '—'}</p>
+                <p class="text-sm text-muted mt-1">${formatDate(b.date)} · ${b.purpose || ''}</p>
               </div>
               <div class="flex items-center gap-3 shrink-0">
                 ${statusBadge(b.status)}
-                <a href="/pages/booking-details.html?id=${encodeURIComponent(b.id)}" class="text-[13px] font-medium text-accent hover:text-accent/80 transition-colors duration-150">Review</a>
+                <a href="/pages/booking-details.html?id=${encodeURIComponent(b.id)}" class="${ui.link}">Review</a>
               </div>
-            </div>`
-            )
-            .join('')}</div>`;
+            </div>`).join('')}</div>`;
         }
         activityEl.innerHTML = emptyState({ title: 'No activity recorded.' });
       } catch {
-        awaitingEl.innerHTML = emptyState({
-          title: 'No pending requests.',
-          hint: 'Requests from your department will appear here when submitted.',
-        });
+        awaitingEl.innerHTML = emptyState({ title: 'No pending requests.', hint: 'Requests from your department will appear here when submitted.' });
         activityEl.innerHTML = emptyState({ title: 'No activity recorded.' });
       }
     };
