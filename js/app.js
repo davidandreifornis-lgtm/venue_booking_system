@@ -1,40 +1,39 @@
 /**
- * Bootstrap: load session, inject shell, dispatch page init.
- * Shell layout is fixed: sidebar 256px + header 56px + content max-w-7xl.
+ * Bootstrap: session + shared shell (sidebar fixed full-height + main content).
+ * Layout matches enterprise reference (sidebar fixed, main-content margin-left).
  */
 
 import { loadSession, isAuthed, role } from './auth.js';
-import { renderSidebar, closeDrawer } from '../components/sidebar.js';
+import { renderSidebar, openDrawer, closeDrawer } from '../components/sidebar.js';
 import { renderHeader } from '../components/header.js';
 
-const PUBLIC = ['/pages/login.html', '/login.html'];
+const PUBLIC = ['login.html'];
+
+function isPublicPath(path) {
+  return PUBLIC.some((p) => path.endsWith(p));
+}
 
 export async function boot() {
   await loadSession();
-
   const path = window.location.pathname;
-  const isPublic = PUBLIC.some((p) => path.endsWith(p) || path.includes('login'));
 
-  if (!isPublic && !isAuthed()) {
-    window.location.href = '/pages/login.html';
+  if (!isPublicPath(path) && !isAuthed()) {
+    window.location.href = 'login.html';
     return;
   }
-
-  if (isPublic && isAuthed()) {
+  if (isPublicPath(path) && isAuthed()) {
     redirectToDashboard(role());
     return;
   }
-
-  if (!isPublic) {
+  if (!isPublicPath(path)) {
     injectShell();
   }
 
-  const init = window.__pageInit;
-  if (typeof init === 'function') {
+  if (typeof window.__pageInit === 'function') {
     try {
-      await init();
+      await window.__pageInit();
     } catch (err) {
-      console.error('[app] page init failed', err);
+      console.error('[app] page init', err);
     }
   }
 }
@@ -43,62 +42,62 @@ function injectShell() {
   const app = document.getElementById('app');
   if (!app) return;
 
+  // Capture page content before rebuilding
+  const pageNodes = Array.from(app.childNodes);
+
+  // Clear body-level layout: build shell as siblings of structure
+  // Structure:
+  //   backdrop
+  //   aside.sidebar
+  //   main.main-content
+  //     .topbar
+  //     .page-body  ← page content
+
   const backdrop = document.createElement('div');
+  backdrop.className = 'sidebar-backdrop';
   backdrop.id = 'sidebar-backdrop';
-  backdrop.className =
-    'fixed inset-0 bg-ink/50 z-40 lg:hidden opacity-0 pointer-events-none transition-opacity duration-200';
   backdrop.addEventListener('click', closeDrawer);
-  document.body.appendChild(backdrop);
 
-  const drawer = document.createElement('aside');
-  drawer.id = 'sidebar-drawer';
-  drawer.className =
-    'fixed inset-y-0 left-0 w-64 bg-ink z-50 transform translate-x-[-100%] lg:translate-x-0 transition-transform duration-200 ease-out lg:static lg:z-auto';
-  document.body.insertBefore(drawer, app);
+  const sidebar = document.createElement('nav');
+  sidebar.className = 'sidebar';
+  sidebar.id = 'sidebar';
+  sidebar.setAttribute('aria-label', 'Main navigation');
 
-  app.className = 'lg:pl-64 min-h-screen flex flex-col bg-paper';
+  const main = document.createElement('main');
+  main.className = 'main-content';
+  main.id = 'mainContent';
 
-  const headerEl = document.createElement('div');
-  headerEl.id = 'app-header';
-  app.prepend(headerEl);
+  const topbar = document.createElement('div');
+  topbar.className = 'topbar';
+  topbar.id = 'app-topbar';
 
-  const content = document.createElement('main');
-  content.id = 'app-content';
-  content.className = 'flex-1 min-w-0 overflow-y-auto';
+  const pageBody = document.createElement('div');
+  pageBody.className = 'page-body';
+  pageBody.id = 'page-body';
 
-  const inner = document.createElement('div');
-  inner.className = 'mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8';
+  pageNodes.forEach((n) => pageBody.appendChild(n));
 
-  while (app.childNodes.length > 1) {
-    inner.appendChild(app.childNodes[1]);
-  }
-  content.appendChild(inner);
-  app.appendChild(content);
+  main.appendChild(topbar);
+  main.appendChild(pageBody);
 
-  renderSidebar(drawer);
-  renderHeader(headerEl);
+  // Replace #app with shell pieces on body
+  app.replaceWith(backdrop, sidebar, main);
 
-  const mq = window.matchMedia('(min-width: 1024px)');
-  function sync() {
-    if (mq.matches) {
-      drawer.classList.remove('translate-x-[-100%]');
-      backdrop.classList.add('opacity-0', 'pointer-events-none');
-    } else {
-      drawer.classList.add('translate-x-[-100%]');
-    }
-  }
-  mq.addEventListener('change', sync);
-  sync();
+  renderSidebar(sidebar);
+  renderHeader(topbar);
+
+  // Ensure body has no margin issues
+  document.body.style.margin = '0';
 }
 
 function redirectToDashboard(r) {
   const map = {
-    Employee: '/pages/employee-dashboard.html',
-    Manager: '/pages/manager-dashboard.html',
-    HR: '/pages/hr-dashboard.html',
-    Administrator: '/pages/admin-dashboard.html',
+    Employee: 'employee-dashboard.html',
+    Manager: 'manager-dashboard.html',
+    HR: 'hr-dashboard.html',
+    Administrator: 'admin-dashboard.html',
   };
-  window.location.href = map[r] || '/pages/login.html';
+  window.location.href = map[r] || 'login.html';
 }
 
 if (document.readyState === 'loading') {

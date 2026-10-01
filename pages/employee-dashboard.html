@@ -4,73 +4,76 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Venue Booking</title>
-  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: { display: ['Fraunces', 'Georgia', 'serif'], sans: ['"Inter Tight"', 'system-ui', 'sans-serif'] },
-          colors: { paper: '#faf8f5', ink: '#1a1815', muted: '#6b6560', rule: '#e8e4dd', accent: '#3d6b66', 'accent-soft': '#e6efee', clay: '#b5623f' },
-          borderRadius: { DEFAULT: '4px', sm: '2px' },
-          boxShadow: { card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)' },
-        },
-      },
-    };
-  </script>
-  <style>body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url('/assets/noise.svg');background-repeat:repeat}</style>
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/tokens.css" />
+  <link rel="stylesheet" href="../assets/css/shell.css" />
+  <link rel="stylesheet" href="../assets/css/components.css" />
 </head>
-<body class="bg-paper text-ink font-sans antialiased" data-page-title="Dashboard">
+<body data-page-title="Dashboard">
   <div id="app">
-    <div id="page-header"></div>
-    <div id="stat-grid" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-10"></div>
-    <section class="mb-10">
-      <div id="sec-recent-h"></div>
-      <div id="recent-requests"></div>
-    </section>
-    <section class="mb-10">
-      <div id="sec-upcoming-h"></div>
-      <div id="upcoming-list"></div>
-    </section>
+    <div class="stat-grid" id="stat-grid">
+      <div class="stat-card">
+        <p class="label">Pending requests</p>
+        <p class="value" id="card-pending">0</p>
+        <p class="hint">Awaiting review</p>
+      </div>
+      <div class="stat-card">
+        <p class="label">Approved bookings</p>
+        <p class="value" id="card-approved">0</p>
+        <p class="hint">Confirmed</p>
+      </div>
+      <div class="stat-card">
+        <p class="label">Upcoming</p>
+        <p class="value" id="card-upcoming">0</p>
+        <p class="hint">Scheduled events</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <div class="card-header-row">
+          <h2>Recent requests</h2>
+          <div class="toolbar">
+            <a href="my-requests.html" class="btn btn-outline btn-sm">View all</a>
+            <a href="booking-form.html" class="btn btn-primary btn-sm">+ New request</a>
+          </div>
+        </div>
+        <div id="recent-requests"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-body">
+        <div class="card-header-row">
+          <h2>Upcoming</h2>
+          <a href="calendar.html" class="btn btn-outline btn-sm">Calendar</a>
+        </div>
+        <div id="upcoming-list"></div>
+      </div>
+    </div>
   </div>
+
   <script type="module">
     import '../js/app.js';
     import { getBookings } from '../js/api.js';
-    import { ui, pageHeader, statCard, sectionHeader } from '../js/ui.js';
     import { dataTable } from '../components/data-table.js';
     import { emptyState } from '../components/empty-state.js';
     import { statusBadge } from '../components/status-badge.js';
     import { formatDate, formatTime } from '../js/utils.js';
 
     window.__pageInit = async function () {
-      document.getElementById('page-header').innerHTML = pageHeader({
-        description: 'Track pending requests, approved bookings, and upcoming events.',
-        actionsHtml: `<a href="/pages/booking-form.html" class="${ui.btnPrimary}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-          New request
-        </a>`,
-      });
-      document.getElementById('stat-grid').innerHTML = [
-        statCard({ label: 'Pending requests', valueId: 'card-pending', hint: 'Awaiting review', accent: 'rule' }),
-        statCard({ label: 'Approved bookings', valueId: 'card-approved', hint: 'Confirmed', accent: 'accent' }),
-        statCard({ label: 'Upcoming', valueId: 'card-upcoming', hint: 'Scheduled events', accent: 'ink' }),
-      ].join('');
-      document.getElementById('sec-recent-h').innerHTML = sectionHeader({ title: 'Recent requests', href: '/pages/my-requests.html' });
-      document.getElementById('sec-upcoming-h').innerHTML = sectionHeader({ title: 'Upcoming', href: '/pages/calendar.html', linkLabel: 'Calendar' });
-
       const recentEl = document.getElementById('recent-requests');
       const upcomingEl = document.getElementById('upcoming-list');
-
       try {
-        const bookings = await getBookings({ scope: 'mine' });
-        const list = Array.isArray(bookings) ? bookings : bookings?.items || [];
-        document.getElementById('card-pending').textContent = String(list.filter((b) => ['Pending Manager Validation', 'Manager Validated', 'Pending HR Decision'].includes(b.status)).length);
+        const data = await getBookings({ scope: 'mine' });
+        const list = Array.isArray(data) ? data : data?.items || [];
+        document.getElementById('card-pending').textContent = String(
+          list.filter((b) => ['Pending Manager Validation', 'Manager Validated', 'Pending HR Decision'].includes(b.status)).length
+        );
         document.getElementById('card-approved').textContent = String(list.filter((b) => b.status === 'Approved').length);
-        document.getElementById('card-upcoming').textContent = String(list.filter((b) => b.status === 'Approved' || b.status === 'Rescheduled').length);
-
+        document.getElementById('card-upcoming').textContent = String(
+          list.filter((b) => b.status === 'Approved' || b.status === 'Rescheduled').length
+        );
         dataTable({
           container: recentEl,
           columns: [
@@ -79,26 +82,37 @@
             { key: 'date', label: 'Date', render: (r) => formatDate(r.date) },
             { key: 'status', label: 'Status', render: (r) => statusBadge(r.status), sortable: false },
           ],
-          rows: list.slice(0, 8),
-          empty: { title: 'No booking requests found.', hint: 'Submit a request to reserve a venue.', actionLabel: 'New request', actionHref: '/pages/booking-form.html' },
-          onRowClick: (row) => { window.location.href = `/pages/booking-details.html?id=${encodeURIComponent(row.id)}`; },
+          rows: list.slice(0, 10),
+          empty: {
+            title: 'No booking requests found.',
+            hint: 'Submit a request to reserve a venue for your next event.',
+            actionLabel: 'New request',
+            actionHref: 'booking-form.html',
+          },
+          onRowClick: (row) => { window.location.href = `booking-details.html?id=${encodeURIComponent(row.id)}`; },
         });
-
         const up = list.filter((b) => b.status === 'Approved' || b.status === 'Rescheduled');
         if (!up.length) {
           upcomingEl.innerHTML = emptyState({ title: 'No upcoming bookings.', hint: 'Approved bookings will appear here.' });
         } else {
-          upcomingEl.innerHTML = `<div class="space-y-2">${up.map((b) => `
-            <a href="/pages/booking-details.html?id=${encodeURIComponent(b.id)}" class="block ${ui.cardInteractive} p-4">
-              <div class="flex items-baseline justify-between gap-3">
-                <p class="text-sm font-medium text-ink">${b.venueName || b.venue || 'Venue'}</p>
-                <p class="text-xs text-muted shrink-0">${formatDate(b.date)} · ${formatTime(b.startTime)}</p>
-              </div>
-              <p class="text-sm text-muted mt-1 truncate">${b.purpose || ''}</p>
-            </a>`).join('')}</div>`;
+          upcomingEl.innerHTML = `<div class="table-responsive"><table class="table"><thead><tr>
+            <th>Venue</th><th>Date</th><th>Time</th><th>Purpose</th>
+          </tr></thead><tbody>
+            ${up.map((b) => `<tr class="clickable" onclick="location.href='booking-details.html?id=${encodeURIComponent(b.id)}'">
+              <td>${b.venueName || b.venue || '—'}</td>
+              <td>${formatDate(b.date)}</td>
+              <td>${formatTime(b.startTime)}</td>
+              <td>${b.purpose || '—'}</td>
+            </tr>`).join('')}
+          </tbody></table></div>`;
         }
       } catch {
-        recentEl.innerHTML = emptyState({ title: 'No booking requests found.', hint: 'Submit a request to reserve a venue.', actionLabel: 'New request', actionHref: '/pages/booking-form.html' });
+        recentEl.innerHTML = emptyState({
+          title: 'No booking requests found.',
+          hint: 'Submit a request to reserve a venue for your next event.',
+          actionLabel: 'New request',
+          actionHref: 'booking-form.html',
+        });
         upcomingEl.innerHTML = emptyState({ title: 'No upcoming bookings.', hint: 'Approved bookings will appear here.' });
       }
     };

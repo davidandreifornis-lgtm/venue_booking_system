@@ -4,99 +4,58 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HR Dashboard — Venue Booking</title>
-  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: { display: ['Fraunces', 'Georgia', 'serif'], sans: ['"Inter Tight"', 'system-ui', 'sans-serif'] },
-          colors: { paper: '#faf8f5', ink: '#1a1815', muted: '#6b6560', rule: '#e8e4dd', accent: '#3d6b66', 'accent-soft': '#e6efee', clay: '#b5623f' },
-          borderRadius: { DEFAULT: '4px', sm: '2px' },
-          boxShadow: { card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)' },
-        },
-      },
-    };
-  </script>
-  <style>body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url('/assets/noise.svg');background-repeat:repeat}</style>
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/tokens.css" />
+  <link rel="stylesheet" href="../assets/css/shell.css" />
+  <link rel="stylesheet" href="../assets/css/components.css" />
 </head>
-<body class="bg-paper text-ink font-sans antialiased" data-page-title="HR Dashboard">
+<body data-page-title="HR Dashboard">
   <div id="app">
-    <div id="page-header"></div>
-    <div id="stat-grid" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-10"></div>
-    <section class="mb-10">
-      <div id="sec-pending-h"></div>
-      <div id="pending-list"></div>
-    </section>
-    <section class="mb-10">
-      <div id="sec-venue-h"></div>
-      <div id="venue-grid" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
-    </section>
+    <div class="stat-grid">
+      <div class="stat-card"><p class="label">Awaiting decision</p><p class="value" id="card-awaiting">0</p><p class="hint">Ready for HR</p></div>
+      <div class="stat-card"><p class="label">Today</p><p class="value" id="card-today">0</p><p class="hint">Bookings today</p></div>
+      <div class="stat-card"><p class="label">This week</p><p class="value" id="card-week">0</p><p class="hint">Confirmed</p></div>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div class="card-header-row">
+          <h2>Pending decisions</h2>
+          <a href="pending-requests.html" class="btn btn-outline btn-sm">View all</a>
+        </div>
+        <div id="pending-list"></div>
+      </div>
+    </div>
   </div>
   <script type="module">
     import '../js/app.js';
-    import { getBookings, getVenues } from '../js/api.js';
-    import { ui, pageHeader, statCard, sectionHeader } from '../js/ui.js';
+    import { getBookings } from '../js/api.js';
     import { emptyState } from '../components/empty-state.js';
     import { statusBadge } from '../components/status-badge.js';
-    import { formatDate, escapeHtml } from '../js/utils.js';
+    import { formatDate } from '../js/utils.js';
 
     window.__pageInit = async function () {
-      document.getElementById('page-header').innerHTML = pageHeader({
-        description: 'Approve, decline, or reschedule manager-validated requests and monitor venue load.',
-      });
-      document.getElementById('stat-grid').innerHTML = [
-        statCard({ label: 'Awaiting decision', valueId: 'card-awaiting', hint: 'Ready for HR', accent: 'clay' }),
-        statCard({ label: "Today's bookings", valueId: 'card-today', hint: 'Events today', accent: 'accent' }),
-        statCard({ label: 'This week', valueId: 'card-week', hint: 'Confirmed events', accent: 'ink' }),
-      ].join('');
-      document.getElementById('sec-pending-h').innerHTML = sectionHeader({ title: 'Pending decisions', href: '/pages/pending-requests.html' });
-      document.getElementById('sec-venue-h').innerHTML = sectionHeader({ title: 'Venue availability', href: '/pages/venue-availability.html', linkLabel: 'Full view' });
-
-      const pendingEl = document.getElementById('pending-list');
-      const venueEl = document.getElementById('venue-grid');
-
+      const el = document.getElementById('pending-list');
       try {
         const data = await getBookings({ status: 'Pending HR Decision' });
         const list = Array.isArray(data) ? data : data?.items || [];
         document.getElementById('card-awaiting').textContent = String(list.length);
         if (!list.length) {
-          pendingEl.innerHTML = emptyState({ title: 'No pending requests.', hint: 'Manager-validated requests will appear here for your decision.' });
+          el.innerHTML = emptyState({ title: 'No pending requests.', hint: 'Manager-validated requests will appear here.' });
         } else {
-          pendingEl.innerHTML = `<div class="space-y-2">${list.map((b) => `
-            <div class="${ui.card} p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-ink truncate">${b.requesterName || '—'} · ${b.venueName || '—'}</p>
-                <p class="text-sm text-muted mt-1">${formatDate(b.date)} · ${b.department || ''}</p>
-              </div>
-              <div class="flex items-center gap-3 shrink-0">
-                ${statusBadge(b.status)}
-                <a href="/pages/booking-details.html?id=${encodeURIComponent(b.id)}" class="${ui.link}">Review</a>
-              </div>
-            </div>`).join('')}</div>`;
+          el.innerHTML = `<div class="table-responsive"><table class="table"><thead><tr>
+            <th>Requester</th><th>Venue</th><th>Date</th><th>Status</th><th></th>
+          </tr></thead><tbody>
+            ${list.map((b) => `<tr>
+              <td>${b.requesterName || '—'}</td>
+              <td>${b.venueName || '—'}</td>
+              <td>${formatDate(b.date)}</td>
+              <td>${statusBadge(b.status)}</td>
+              <td><a class="btn btn-primary btn-sm" href="booking-details.html?id=${encodeURIComponent(b.id)}">Review</a></td>
+            </tr>`).join('')}
+          </tbody></table></div>`;
         }
       } catch {
-        pendingEl.innerHTML = emptyState({ title: 'No pending requests.', hint: 'Manager-validated requests will appear here for your decision.' });
-      }
-
-      try {
-        const venues = await getVenues();
-        const vlist = Array.isArray(venues) ? venues : venues?.items || [];
-        if (!vlist.length) {
-          venueEl.innerHTML = `<div class="col-span-full">${emptyState({ title: 'No venues available.' })}</div>`;
-        } else {
-          venueEl.innerHTML = vlist.map((v) => `
-            <div class="${ui.card} p-5">
-              <p class="text-sm font-medium text-ink">${escapeHtml(v.name)}</p>
-              <p class="text-sm text-muted mt-1">${escapeHtml(v.location || '')} · Cap. ${v.capacity ?? '—'}</p>
-              <p class="mt-3 text-[11px] uppercase tracking-[0.08em] ${v.status === 'Available' ? 'text-accent' : 'text-muted'}">${escapeHtml(v.status || '—')}</p>
-            </div>`).join('');
-        }
-      } catch {
-        venueEl.innerHTML = `<div class="col-span-full">${emptyState({ title: 'No venues available.' })}</div>`;
+        el.innerHTML = emptyState({ title: 'No pending requests.', hint: 'Manager-validated requests will appear here.' });
       }
     };
   </script>

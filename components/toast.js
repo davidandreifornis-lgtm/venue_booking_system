@@ -1,55 +1,18 @@
-/**
- * Standard toast notifications — top-right stack.
- */
-
 let root = null;
-
 function ensureRoot() {
   if (root) return root;
   root = document.createElement('div');
-  root.id = 'toast-root';
-  root.className = 'fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none max-w-[calc(100vw-2rem)]';
+  root.className = 'toast-root';
   document.body.appendChild(root);
   return root;
 }
-
-export function toast(message, type = 'info', duration = 4200) {
+export function toast(message, type = 'info', duration = 4000) {
   const el = document.createElement('div');
-  const bar =
-    type === 'error' ? 'bg-clay' :
-    type === 'success' ? 'bg-accent' :
-    'bg-rule';
-
-  el.className =
-    'pointer-events-auto w-full max-w-sm rounded border border-rule bg-paper shadow-card overflow-hidden flex transition-opacity duration-200 opacity-0';
-  el.innerHTML = `
-    <div class="w-[3px] shrink-0 ${bar}"></div>
-    <div class="flex-1 px-4 py-3 flex items-start gap-3">
-      <span class="flex-1 text-sm leading-snug text-ink">${escape(message)}</span>
-      <button type="button" class="text-muted hover:text-ink shrink-0 p-0.5" aria-label="Dismiss">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
-    </div>
-  `;
-
+  el.className = `toast toast-${type === 'error' ? 'error' : type === 'success' ? 'success' : 'info'}`;
+  el.innerHTML = `<span style="flex:1">${String(message).replace(/</g,'&lt;')}</span>
+    <button type="button" aria-label="Dismiss" style="border:none;background:transparent;cursor:pointer;color:#6c757d">×</button>`;
   ensureRoot().appendChild(el);
-  requestAnimationFrame(() => {
-    el.style.opacity = '1';
-  });
-
-  const remove = () => {
-    el.style.opacity = '0';
-    setTimeout(() => el.remove(), 200);
-  };
-
+  const remove = () => el.remove();
   el.querySelector('button').addEventListener('click', remove);
   setTimeout(remove, duration);
-}
-
-function escape(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }

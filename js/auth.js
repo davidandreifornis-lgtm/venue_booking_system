@@ -181,5 +181,5 @@ export async function logout() {
   clearDemoSession();
   _session = null;
   emit('session:change', null);
-  window.location.href = '/pages/login.html';
+  window.location.href = 'login.html';
 }

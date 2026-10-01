@@ -1,37 +1,23 @@
-/**
- * Single empty-state component for the entire application.
- */
-
 import { escapeHtml } from '../js/utils.js';
-import { ui } from '../js/ui.js';
 
-/**
- * @param {object} opts
- * @param {string} opts.title
- * @param {string} [opts.hint]
- * @param {string} [opts.actionLabel]
- * @param {string} [opts.actionHref]
- * @param {string} [opts.actionId]
- */
 export function emptyState({ title, hint, actionLabel, actionHref, actionId }) {
   let action = '';
   if (actionLabel && actionHref) {
-    action = `<a href="${escapeHtml(actionHref)}" class="${ui.btnPrimary} mt-6">${escapeHtml(actionLabel)}</a>`;
+    action = `<a href="${escapeHtml(actionHref)}" class="btn btn-primary">${escapeHtml(actionLabel)}</a>`;
   } else if (actionLabel && actionId) {
-    action = `<button type="button" id="${escapeHtml(actionId)}" class="${ui.btnPrimary} mt-6">${escapeHtml(actionLabel)}</button>`;
+    action = `<button type="button" id="${escapeHtml(actionId)}" class="btn btn-primary">${escapeHtml(actionLabel)}</button>`;
   }
-
   return `
-    <div class="flex flex-col items-start py-12 sm:py-14">
-      <div class="h-px w-10 bg-rule mb-6"></div>
-      <h3 class="font-display text-xl sm:text-2xl font-medium tracking-[-0.03em] text-ink leading-snug max-w-md">${escapeHtml(title)}</h3>
-      ${hint ? `<p class="mt-2 text-sm text-muted leading-relaxed max-w-sm">${escapeHtml(hint)}</p>` : ''}
-      ${action}
+    <div class="empty-state">
+      <div class="icon" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+      </div>
+      <h3>${escapeHtml(title)}</h3>
+      ${hint ? `<p>${escapeHtml(hint)}</p>` : ''}
+      ${action ? `<div>${action}</div>` : ''}
     </div>
   `;
 }
-
 export function renderEmpty(container, opts) {
-  if (!container) return;
-  container.innerHTML = emptyState(opts);
+  if (container) container.innerHTML = emptyState(opts);
 }
