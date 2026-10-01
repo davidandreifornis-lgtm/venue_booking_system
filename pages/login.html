@@ -19,7 +19,7 @@
 
         <div style="margin-bottom:14px">
           <label class="form-label" for="email">Email</label>
-          <input class="form-control" type="email" id="email" name="email" required autocomplete="username" placeholder="you@company.com" />
+          <input class="form-control" type="text" id="email" name="email" required autocomplete="username" placeholder="you@company.com" />
         </div>
         <div style="margin-bottom:18px">
           <label class="form-label" for="password">Password</label>
@@ -27,21 +27,12 @@
         </div>
         <button type="submit" id="login-submit" class="btn btn-dark" style="width:100%;height:42px">Sign in</button>
       </form>
-
-      <p style="margin:20px 0 8px;font-size:0.75rem;font-weight:600;color:#6c757d;text-transform:uppercase;letter-spacing:.06em">Demo accounts</p>
-      <div class="demo-grid">
-        <button type="button" class="demo-btn" data-demo="admin"><strong>admin</strong><span>Administrator</span></button>
-        <button type="button" class="demo-btn" data-demo="hr"><strong>hr</strong><span>HR</span></button>
-        <button type="button" class="demo-btn" data-demo="manager"><strong>manager</strong><span>Manager</span></button>
-        <button type="button" class="demo-btn" data-demo="employee"><strong>employee</strong><span>Employee</span></button>
-      </div>
-      <p style="margin:10px 0 0;font-size:0.75rem;color:#adb5bd">Password matches the username</p>
     </div>
   </div>
 
   <script type="module">
     import { login } from '../js/api.js';
-    import { loadSession, isAuthed, role, tryDemoLogin } from '../js/auth.js';
+    import { loadSession, isAuthed, role, setSession } from '../js/auth.js';
 
     const roleMap = {
       Employee: 'employee-dashboard.html',
@@ -51,39 +42,29 @@
     };
 
     await loadSession();
-    if (isAuthed()) window.location.replace(roleMap[role()] || 'login.html');
+    if (isAuthed()) {
+      window.location.replace(roleMap[role()] || 'employee-dashboard.html');
+    }
 
     const form = document.getElementById('login-form');
     const errEl = document.getElementById('login-error');
     const btn = document.getElementById('login-submit');
-
-    document.querySelectorAll('[data-demo]').forEach((el) => {
-      el.addEventListener('click', () => {
-        const u = el.getAttribute('data-demo');
-        form.email.value = u;
-        form.password.value = u;
-        form.requestSubmit();
-      });
-    });
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       errEl.hidden = true;
       btn.disabled = true;
       btn.textContent = 'Signing in…';
+
       const email = form.email.value.trim();
       const password = form.password.value;
+
       try {
-        await login(email, password);
-        await loadSession();
-        window.location.href = roleMap[role()] || 'employee-dashboard.html';
-      } catch {
-        const demo = tryDemoLogin(email, password);
-        if (demo) {
-          window.location.href = roleMap[demo.role] || 'employee-dashboard.html';
-          return;
-        }
-        errEl.textContent = 'Unable to reach the authentication service.';
+        const user = await login(email, password);
+        setSession(user);
+        window.location.href = roleMap[user?.role] || 'employee-dashboard.html';
+      } catch (err) {
+        errEl.textContent = err?.message || 'Invalid email or password.';
         errEl.hidden = false;
       } finally {
         btn.disabled = false;

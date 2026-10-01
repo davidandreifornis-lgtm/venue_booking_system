@@ -1,0 +1,3 @@
+RewriteEngine On
+# Proxy /api/* to backend/api/index.php
+RewriteRule ^api/(.*)$ backend/api/index.php [QSA,L]
