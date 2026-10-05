@@ -1,12 +1,23 @@
 /**
- * Backend seam. All calls hit /api/... and throw on failure.
- * No mock data. No fake resolves.
- * Drop in a real REST backend later without changing page markup.
+ * Backend seam for XAMPP at /venue_booking_system/
+ * Uses backend/api/index.php?r=/path so NO mod_rewrite is required.
  */
 
-const BASE = '/api';
+const API_ENTRY = '/venue_booking_system/backend/api/index.php';
 
 async function request(method, path, body = null) {
+  // Split path and its query string (e.g. /bookings?status=Approved)
+  let route = path;
+  let extraQuery = '';
+  const qPos = path.indexOf('?');
+  if (qPos >= 0) {
+    route = path.slice(0, qPos);
+    extraQuery = path.slice(qPos + 1);
+  }
+
+  let url = `${API_ENTRY}?r=${encodeURIComponent(route)}`;
+  if (extraQuery) url += '&' + extraQuery;
+
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -16,7 +27,7 @@ async function request(method, path, body = null) {
 
   let res;
   try {
-    res = await fetch(`${BASE}${path}`, opts);
+    res = await fetch(url, opts);
   } catch (err) {
     const e = new Error('Network error: unable to reach the server.');
     e.cause = err;

@@ -37,11 +37,19 @@ $method = $_SERVER['REQUEST_METHOD'];
 $uri = $_SERVER['REQUEST_URI'] ?? '/';
 $path = parse_url($uri, PHP_URL_PATH) ?: '/';
 
-// Strip base prefixes: /api, /backend/api, /venue-booking-system/backend/api
-$path = preg_replace('#^.*?/api#', '', $path) ?: '/';
-$path = '/' . trim($path, '/');
+// Prefer explicit route from ?r= (works without URL rewrite on XAMPP)
+if (!empty($_GET['r'])) {
+    $path = '/' . trim((string)$_GET['r'], '/');
+} else {
+    // Strip base prefixes: /api, /backend/api, /venue_booking_system/api, etc.
+    $path = preg_replace('#^.*?/api(?:/index\.php)?#', '', $path) ?: '/';
+    $path = '/' . trim($path, '/');
+}
 if ($path !== '/') {
     $path = rtrim($path, '/');
+}
+if ($path === '' || $path === '/index.php') {
+    $path = '/';
 }
 
 $body = [];

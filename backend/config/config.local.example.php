@@ -1,12 +1,9 @@
 <?php
 /**
- * Optional local override.
- * Copy this file to config.local.php (do not commit) if you need different DB settings.
+ * Optional local override for database connection.
+ * Copy this file to config.local.php (do not commit) if you need different settings.
  *
- * Currently Database.php reads database.php only.
- * To use a local override, either:
- *   1. Edit database.php directly, or
- *   2. Point Database.php at this file (advanced).
+ * Database.php will merge config.local.php over database.php when present.
  */
 return [
     'driver'   => 'sqlsrv',

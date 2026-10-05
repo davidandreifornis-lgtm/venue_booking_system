@@ -1,0 +1,27 @@
+Venue Booking System — XAMPP install (VMAPPS2 / VenueBooking)
+
+1. Copy this whole folder to:
+   C:\xampp\htdocs\venue_booking_system\
+
+2. Database is already configured in:
+   backend/config/database.php
+   (server=VMAPPS2, database=VenueBooking, user=sa_dev)
+
+3. If Settings table is empty, run in SSMS/Navicat:
+   database/04_fix_settings.sql
+
+4. Test DB:
+   http://localhost/venue_booking_system/backend/api/health.php
+   http://localhost/venue_booking_system/backend/api/index.php?r=/health
+
+5. Login page:
+   http://localhost/venue_booking_system/pages/login.html
+
+   employee / employee
+   manager  / manager
+   hr       / hr
+   admin    / admin
+
+API calls use:
+  /venue_booking_system/backend/api/index.php?r=/auth/login
+so mod_rewrite is NOT required.

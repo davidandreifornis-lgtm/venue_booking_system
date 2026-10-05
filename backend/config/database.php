@@ -1,7 +1,8 @@
 <?php
 /**
  * SQL Server connection — single source of truth.
- * Used by Database::config() / Database::pdo().
+ * Same server/credentials that work for toner_inventory.
+ * Database name MUST be VenueBooking.
  */
 return [
     'driver'   => 'sqlsrv',

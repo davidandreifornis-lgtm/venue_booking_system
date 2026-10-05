@@ -6,17 +6,7 @@
 - Microsoft SQL Server 2016+ (or Azure SQL)
 - Navicat / SSMS to run the SQL scripts
 
-## Database setup
-
-1. Connect to SQL Server (server: `VMAPPS2`).
-2. Create database **VenueBooking** if it does not exist.
-3. Run in order:
-   - `database/01_schema.sql`
-   - `database/02_seed.sql`
-   - (optional) `database/03_seed_demo_data.sql`
-4. Confirm tables under `dbo`: Users, Roles, Departments, Venues, Bookings, etc.
-
-## Connection config
+## Database connection (your environment)
 
 Credentials live in **one place only**:
 
@@ -24,7 +14,7 @@ Credentials live in **one place only**:
 backend/config/database.php
 ```
 
-Current values:
+Current values (same server/login as toner_inventory):
 
 | Key        | Value         |
 |------------|---------------|
@@ -35,7 +25,17 @@ Current values:
 | password   | D3fault       |
 | port       | (empty)       |
 
-App settings (session, lockout, CORS, debug) are in `backend/config/config.php`.
+Optional override: copy `config.local.example.php` → `config.local.php` and edit there (Database.php merges it automatically).
+
+## Database setup
+
+1. On SQL Server `VMAPPS2`, create database **VenueBooking** if it does not exist.
+2. Run in order (Navicat / SSMS):
+   - `database/01_schema.sql`
+   - `database/02_seed.sql`
+   - (optional) `database/03_seed_demo_data.sql`
+   - **`database/04_fix_settings.sql`** ← run this if Settings table is empty
+3. Confirm tables under `dbo`: Users, Roles, Departments, Venues, Bookings, Settings, etc.
 
 ## Demo logins (after seed)
 
@@ -48,18 +48,19 @@ App settings (session, lockout, CORS, debug) are in `backend/config/config.php`.
 
 Emails like `admin@company.local` also work with the same passwords.
 
+## Verify connection
+
+1. `http://your-site/backend/api/ping.php` → PHP alive
+2. `http://your-site/backend/api/health.php` → must show `"ok": true` and `"db_name": "VenueBooking"`
+3. `http://your-site/api/health` → same via URL rewrite
+
 ## Run the API
 
 ### IIS (Windows)
 
 - Point the site physical path at the **project root**.
 - Install URL Rewrite module (`web.config` at root rewrites `/api/*` → `backend/api/index.php`).
-- Confirm:
-  - `http://venuebooking/backend/api/ping.php` → PHP alive
-  - `http://venuebooking/backend/api/health.php` → DB check
-  - `http://venuebooking/api/health` → same via rewrite
-
-See root `SETUP_IIS.md` for details.
+- See root `SETUP_IIS.md`.
 
 ### Apache
 

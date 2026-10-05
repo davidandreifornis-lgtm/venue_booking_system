@@ -2,6 +2,7 @@
 /**
  * PDO connection to SQL Server (VenueBooking).
  * Credentials: backend/config/database.php
+ * Optional override: backend/config/config.local.php
  */
 
 class Database
@@ -14,7 +15,17 @@ class Database
         if (!is_file($path)) {
             throw new RuntimeException('Missing backend/config/database.php');
         }
-        return require $path;
+        $config = require $path;
+
+        $local = __DIR__ . '/../config/config.local.php';
+        if (is_file($local)) {
+            $override = require $local;
+            if (is_array($override)) {
+                $config = array_merge($config, $override);
+            }
+        }
+
+        return $config;
     }
 
     public static function pdo(): PDO
@@ -32,7 +43,9 @@ class Database
         $driver   = $config['driver'] ?? 'sqlsrv';
         $port     = trim((string)($config['port'] ?? ''));
 
-        if ($database === '') {
+        if ($database === '' || strcasecmp($database, 'toner_inventory') === 0
+            || strcasecmp($database, 'toner_inventory_test') === 0
+            || strcasecmp($database, 'wlms') === 0) {
             $database = 'VenueBooking';
         }
 
@@ -65,7 +78,6 @@ class Database
             );
         }
 
-        // Confirm we landed on the expected database
         try {
             $row = self::$pdo->query('SELECT DB_NAME() AS dbname')->fetch(PDO::FETCH_ASSOC);
             $row = array_change_key_case($row ?: [], CASE_LOWER);
