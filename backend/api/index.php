@@ -152,8 +152,7 @@ function route(string $method, string $path, array $body): void
         }
         if ($method === 'PUT') {
             $user = Auth::requireUser();
-            // Only owner can edit pending — simplified: cancel + recreate for now
-            Response::error('Use cancel and create a new request, or contact HR to reschedule.', 501);
+            Response::json(BookingService::resubmit($user, $id, $body));
         }
     }
 
@@ -179,9 +178,37 @@ function route(string $method, string $path, array $body): void
         Permissions::require($user, 'booking.decide');
         Response::json(BookingService::reschedule($user, (int)$m[1], $body));
     }
+    if (preg_match('#^/bookings/(\d+)/request-revision$#', $path, $m) && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.validate');
+        Response::json(BookingService::requestRevision($user, (int)$m[1], $body));
+    }
+    if (preg_match('#^/bookings/(\d+)/respond-reschedule$#', $path, $m) && $method === 'POST') {
+        $user = Auth::requireUser();
+        Response::json(BookingService::respondReschedule($user, (int)$m[1], $body));
+    }
     if (preg_match('#^/bookings/(\d+)/cancel$#', $path, $m) && $method === 'POST') {
         $user = Auth::requireUser();
         Response::json(BookingService::cancel($user, (int)$m[1], $body));
+    }
+
+    // Requirement options (admin-defined)
+    if ($path === '/requirement-options' && $method === 'GET') {
+        $user = Auth::requireUser();
+        $all = !empty($_GET['all']) && Permissions::can($user, 'settings.manage');
+        Response::json(RequirementOptions::list($all));
+    }
+    if ($path === '/requirement-options' && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'settings.manage');
+        ActivityLog::write($user['id'], $user['email'], 'requirement_option.create', 'settings', null, ['name' => $body['name'] ?? '']);
+        Response::json(RequirementOptions::save(null, $body), 201);
+    }
+    if (preg_match('#^/requirement-options/(\d+)$#', $path, $m) && $method === 'PUT') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'settings.manage');
+        ActivityLog::write($user['id'], $user['email'], 'requirement_option.update', 'settings', $m[1], null);
+        Response::json(RequirementOptions::save((int)$m[1], $body));
     }
 
     // Venues
@@ -213,14 +240,13 @@ function route(string $method, string $path, array $body): void
         $pdo = Database::pdo();
         try {
             $stmt = $pdo->prepare(
-                "INSERT INTO dbo.Venues (Name, Location, Capacity, Equipment, Status)
-                 OUTPUT INSERTED.VenueId VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO dbo.Venues (Name, Location, Capacity, Status)
+                 OUTPUT INSERTED.VenueId VALUES (?, ?, ?, ?)"
             );
             $stmt->execute([
                 $name,
                 $body['location'] ?? null,
                 $cap,
-                $body['equipment'] ?? null,
                 $body['status'] ?? 'Available',
             ]);
             $id = (int)$stmt->fetchColumn();
@@ -245,13 +271,12 @@ function route(string $method, string $path, array $body): void
         $pdo = Database::pdo();
         $pdo->prepare(
             "UPDATE dbo.Venues SET Name = COALESCE(?, Name), Location = COALESCE(?, Location),
-                Capacity = COALESCE(?, Capacity), Equipment = COALESCE(?, Equipment),
+                Capacity = COALESCE(?, Capacity),
                 Status = COALESCE(?, Status), UpdatedAt = SYSUTCDATETIME() WHERE VenueId = ?"
         )->execute([
             isset($body['name']) ? trim($body['name']) : null,
             $body['location'] ?? null,
             isset($body['capacity']) ? (int)$body['capacity'] : null,
-            $body['equipment'] ?? null,
             $body['status'] ?? null,
             $id,
         ]);
@@ -307,6 +332,9 @@ function route(string $method, string $path, array $body): void
         if ($email === '' || $name === '' || $password === '') {
             Response::error('Email, name, and password are required.', 422);
         }
+        if (strlen($password) < 6) {
+            Response::error('Password must be at least 6 characters.', 422);
+        }
         $roleId = roleId($role);
         if (!$roleId) {
             Response::error('Invalid role.', 422);
@@ -341,6 +369,30 @@ function route(string $method, string $path, array $body): void
         $id = (int)$m[1];
         $pdo = Database::pdo();
         $roleId = isset($body['role']) ? roleId($body['role']) : null;
+        if (isset($body['role']) && !$roleId) {
+            Response::error('Invalid role.', 422);
+        }
+        if (!empty($body['password']) && strlen((string)$body['password']) < 6) {
+            Response::error('Password must be at least 6 characters.', 422);
+        }
+        $target = getUser($id);
+        if (!$target) {
+            Response::error('Not found.', 404);
+        }
+        $demote = $target['role'] === 'Administrator' && isset($body['role']) && $body['role'] !== 'Administrator';
+        $deact = $target['role'] === 'Administrator' && isset($body['isActive']) && !$body['isActive'];
+        if ($demote || $deact) {
+            $cnt = (int)$pdo->query(
+                "SELECT COUNT(*) FROM dbo.Users u INNER JOIN dbo.Roles r ON r.RoleId = u.RoleId
+                 WHERE r.RoleCode = 'Administrator' AND u.IsActive = 1"
+            )->fetchColumn();
+            if ($cnt <= 1) {
+                Response::error('Cannot remove the last active Administrator.', 409);
+            }
+        }
+        if (isset($body['isActive'])) {
+            $pdo->prepare('UPDATE dbo.Users SET IsActive = ? WHERE UserId = ?')->execute([$body['isActive'] ? 1 : 0, $id]);
+        }
         $pdo->prepare(
             "UPDATE dbo.Users SET
                 FullName = COALESCE(?, FullName),
@@ -358,7 +410,7 @@ function route(string $method, string $path, array $body): void
             $pdo->prepare('UPDATE dbo.Users SET PasswordHash = ?, UpdatedAt = SYSUTCDATETIME() WHERE UserId = ?')
                 ->execute([password_hash($body['password'], PASSWORD_BCRYPT), $id]);
         }
-        ActivityLog::write($user['id'], $user['email'], 'user.update', 'user', (string)$id, null);
+        ActivityLog::write($user['id'], $user['email'], 'user.update', 'user', (string)$id, ['passwordChanged' => !empty($body['password']), 'role' => $body['role'] ?? null]);
         Response::json(getUser($id));
     }
     if (preg_match('#^/users/(\d+)/deactivate$#', $path, $m) && $method === 'POST') {
@@ -390,6 +442,7 @@ function route(string $method, string $path, array $body): void
             "SELECT d.DepartmentId, d.Name, d.IsActive, d.ManagerUserId, u.FullName AS ManagerName
              FROM dbo.Departments d
              LEFT JOIN dbo.Users u ON u.UserId = d.ManagerUserId
+             WHERE d.IsActive = 1
              ORDER BY d.Name"
         )->fetchAll();
         Response::json(array_map(static function ($r) {
@@ -428,6 +481,33 @@ function route(string $method, string $path, array $body): void
             'UPDATE dbo.Departments SET Name = COALESCE(?, Name), UpdatedAt = SYSUTCDATETIME() WHERE DepartmentId = ?'
         )->execute([isset($body['name']) ? trim($body['name']) : null, $id]);
         Response::json(['id' => $id]);
+    }
+    if (preg_match('#^/departments/(\d+)/remove$#', $path, $m) && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'department.manage');
+        $id = (int)$m[1];
+        $pdo = Database::pdo();
+        $c = $pdo->prepare('SELECT COUNT(*) FROM dbo.Users WHERE DepartmentId = ? AND IsActive = 1');
+        $c->execute([$id]);
+        $n = (int)$c->fetchColumn();
+        if ($n > 0) {
+            Response::error("Cannot remove: $n active user(s) still belong to this department. Move them first.", 409);
+        }
+        $b = $pdo->prepare('SELECT COUNT(*) FROM dbo.Bookings WHERE DepartmentId = ?');
+        $b->execute([$id]);
+        if ((int)$b->fetchColumn() > 0) {
+            // Has booking history: hide instead of deleting so records stay intact.
+            $pdo->prepare('UPDATE dbo.Departments SET IsActive = 0, UpdatedAt = SYSUTCDATETIME() WHERE DepartmentId = ?')->execute([$id]);
+        } else {
+            try {
+                $pdo->prepare('UPDATE dbo.Users SET DepartmentId = NULL WHERE DepartmentId = ?')->execute([$id]);
+                $pdo->prepare('DELETE FROM dbo.Departments WHERE DepartmentId = ?')->execute([$id]);
+            } catch (PDOException $e) {
+                $pdo->prepare('UPDATE dbo.Departments SET IsActive = 0, UpdatedAt = SYSUTCDATETIME() WHERE DepartmentId = ?')->execute([$id]);
+            }
+        }
+        ActivityLog::write($user['id'], $user['email'], 'department.remove', 'department', (string)$id, null);
+        Response::json(['id' => $id, 'removed' => true]);
     }
     if (preg_match('#^/departments/(\d+)/assign-manager$#', $path, $m) && $method === 'POST') {
         $user = Auth::requireUser();
@@ -504,7 +584,6 @@ function mapVenue(array $r): array
         'name' => $r['Name'],
         'location' => $r['Location'],
         'capacity' => (int)$r['Capacity'],
-        'equipment' => $r['Equipment'],
         'status' => $r['Status'],
         'isActive' => (bool)$r['IsActive'],
     ];

@@ -62,8 +62,8 @@
 
   <script type="module">
     import '../js/app.js';
-    import { getBooking, validateBooking, approveBooking, declineBooking, rescheduleBooking } from '../js/api.js';
-    import { role } from '../js/auth.js';
+    import { getBooking, validateBooking, approveBooking, declineBooking, rescheduleBooking, requestRevision, respondReschedule, resubmitBooking } from '../js/api.js';
+    import { role, session } from '../js/auth.js';
     import { parseQuery, formatDate, formatTime, formatDateTime, escapeHtml } from '../js/utils.js';
     import { statusBadge } from '../components/status-badge.js';
     import { timeline } from '../components/timeline.js';
@@ -122,7 +122,8 @@
               ${dl('Date', formatDate(booking.date))}
               ${dl('Time', `${formatTime(booking.startTime)} – ${formatTime(booking.endTime)}`)}
               ${dl('Attendees', escapeHtml(String(booking.attendees ?? '—')))}
-              ${dl('Additional Requirements', escapeHtml(booking.additionalRequirements || '—'))}
+              ${dl('Requirements', (booking.requirements || []).map((r) => escapeHtml(r.name) + (r.quantity > 1 ? ' ×' + r.quantity : '')).join(', ') || '—')}
+              ${dl('Other Notes', escapeHtml(booking.additionalRequirements || '—'))}
               ${dl('Manager Notes', escapeHtml(booking.managerNotes || '—'))}
               ${dl('HR Notes', escapeHtml(booking.hrNotes || '—'))}
               ${dl('Created', formatDateTime(booking.createdAt || booking.createdDate))}
@@ -148,7 +149,8 @@
       if (canManagerAct && actionBar) {
         actionBar.innerHTML = `
           <button type="button" id="act-validate" class="px-4 py-2 text-sm bg-accent text-paper rounded-sm hover:bg-accent/90">Validate</button>
-          <button type="button" id="act-reject" class="px-4 py-2 text-sm border border-clay text-clay rounded-sm hover:bg-clay/5">Reject / Return</button>
+          <button type="button" id="act-revision" class="px-4 py-2 text-sm border border-rule text-ink rounded-sm hover:bg-rule/30">Request revision</button>
+          <button type="button" id="act-reject" class="px-4 py-2 text-sm border border-clay text-clay rounded-sm hover:bg-clay/5">Reject</button>
         `;
         document.getElementById('act-validate')?.addEventListener('click', async () => {
           const ok = await confirm({ title: 'Validate request', message: 'Confirm this request is valid and ready for HR review?', confirmLabel: 'Validate' });
@@ -162,7 +164,7 @@
         });
         document.getElementById('act-reject')?.addEventListener('click', async () => {
           openModal({
-            title: 'Reject / Return',
+            title: 'Reject request',
             bodyHtml: `
               <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Manager notes (required)</label>
               <textarea id="mgr-notes" rows="3" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" required></textarea>
@@ -178,10 +180,68 @@
             if (!notes) return;
             closeModal();
             try {
-              await validateBooking(id, { approved: false, notes });
-            } catch {
-              toast('Backend not connected yet. Request not sent.', 'error');
+              await declineBooking(id, { reason: notes });
+              location.reload();
+            } catch (err) {
+              toast(err.message || 'Action failed.', 'error');
             }
+          });
+        });
+      }
+
+      const run = async (fn, msg) => {
+        try { await fn(); toast(msg, 'success'); setTimeout(() => location.reload(), 600); }
+        catch (err) { toast(err.message || 'Action failed.', 'error'); }
+      };
+      const isOwner = session()?.id === booking.requesterId;
+      const fld = 'class="w-full border border-rule rounded-sm px-3 py-2 text-sm"';
+      const lb = 'class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1 mt-3"';
+      const btnCancel = '<button type="button" data-cancel class="px-3 py-1.5 text-sm border border-rule rounded-sm">Cancel</button>';
+
+      document.getElementById('act-revision')?.addEventListener('click', () => {
+        openModal({
+          title: 'Request revision',
+          bodyHtml: `<label ${lb}>Comments (required)</label><textarea id="rev-notes" rows="3" ${fld}></textarea>`,
+          footerHtml: `${btnCancel}<button type="button" id="rev-ok" class="px-3 py-1.5 text-sm bg-accent text-paper rounded-sm">Send</button>`,
+        });
+        document.querySelector('[data-cancel]')?.addEventListener('click', closeModal);
+        document.getElementById('rev-ok')?.addEventListener('click', () => {
+          const notes = document.getElementById('rev-notes')?.value?.trim();
+          if (!notes) return;
+          closeModal();
+          run(() => requestRevision(id, { notes }), 'Revision requested.');
+        });
+      });
+
+      if (isOwner && booking.status === 'Reschedule Proposed' && actionBar) {
+        actionBar.innerHTML = `
+          <p class="w-full text-sm mb-2">HR proposed: <strong>${formatDate(booking.proposedDate)}</strong>, ${formatTime(booking.proposedStartTime)} – ${formatTime(booking.proposedEndTime)}${booking.proposalNotes ? ' — ' + escapeHtml(booking.proposalNotes) : ''}</p>
+          <button type="button" id="act-accept" class="px-4 py-2 text-sm bg-accent text-paper rounded-sm">Accept new schedule</button>
+          <button type="button" id="act-refuse" class="px-4 py-2 text-sm border border-clay text-clay rounded-sm">Reject (booking will be declined)</button>`;
+        document.getElementById('act-accept').addEventListener('click', () => run(() => respondReschedule(id, { accept: true }), 'Schedule accepted.'));
+        document.getElementById('act-refuse').addEventListener('click', async () => {
+          if (await confirm({ title: 'Reject proposal?', message: 'Rejecting will decline this booking request.' })) run(() => respondReschedule(id, { accept: false }), 'Proposal rejected.');
+        });
+      }
+
+      if (isOwner && booking.status === 'Revision Requested' && actionBar) {
+        actionBar.innerHTML = `<p class="w-full text-sm mb-2">Manager comments: ${escapeHtml(booking.managerNotes || '—')}</p>
+          <button type="button" id="act-edit" class="px-4 py-2 text-sm bg-accent text-paper rounded-sm">Edit &amp; resubmit</button>`;
+        document.getElementById('act-edit').addEventListener('click', () => {
+          openModal({
+            title: 'Edit & resubmit',
+            bodyHtml: `<label ${lb}>Date</label><input id="e-date" type="date" value="${booking.date}" ${fld} />
+              <label ${lb}>Start</label><input id="e-start" type="time" value="${booking.startTime}" ${fld} />
+              <label ${lb}>End</label><input id="e-end" type="time" value="${booking.endTime}" ${fld} />
+              <label ${lb}>Attendees</label><input id="e-att" type="number" min="1" value="${booking.attendees}" ${fld} />
+              <label ${lb}>Purpose</label><textarea id="e-purpose" rows="3" ${fld}>${escapeHtml(booking.purpose || '')}</textarea>`,
+            footerHtml: `${btnCancel}<button type="button" id="e-ok" class="px-3 py-1.5 text-sm bg-accent text-paper rounded-sm">Resubmit</button>`,
+          });
+          document.querySelector('[data-cancel]')?.addEventListener('click', closeModal);
+          document.getElementById('e-ok')?.addEventListener('click', () => {
+            const g = (x) => document.getElementById(x).value;
+            closeModal();
+            run(() => resubmitBooking(id, { date: g('e-date'), startTime: g('e-start'), endTime: g('e-end'), attendees: Number(g('e-att')), purpose: g('e-purpose') }), 'Resubmitted.');
           });
         });
       }
@@ -287,7 +347,7 @@
             }
             closeModal();
             try {
-              await rescheduleBooking(id, { date, startTime, endTime, reason });
+              await rescheduleBooking(id, { date, startTime, endTime, reason, notes: reason });
             } catch {
               toast('Backend not connected yet. Request not sent.', 'error');
             }

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Requirement Options — Venue Booking</title>
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/css/tokens.css" />
+  <link rel="stylesheet" href="../assets/css/shell.css" />
+  <link rel="stylesheet" href="../assets/css/components.css" />
+  <link rel="stylesheet" href="../assets/css/tokens.css" />
+  <link rel="stylesheet" href="../assets/css/shell.css" />
+  <link rel="stylesheet" href="../assets/css/components.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Fraunces', 'Georgia', 'serif'],
+            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            paper: '#faf8f5',
+            ink: '#1a1815',
+            muted: '#6b6560',
+            rule: '#e8e4dd',
+            accent: '#3d6b66',
+            'accent-soft': '#e6efee',
+            clay: '#b5623f',
+          },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: {
+            card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url('../assets/noise.svg');
+      background-repeat: repeat;
+    }
+  </style>
+</head>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Requirement Options">
+  <div id="app">
+    <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <p class="text-sm text-muted leading-relaxed max-w-2xl">Options users can pick under "Additional requirements" when booking. Max quantity 1 shows a tick box; higher lets users choose a quantity.</p>
+      <button type="button" id="btn-add" class="inline-flex items-center justify-center gap-2 rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 shrink-0">Add option</button>
+    </div>
+    <div id="opts-table"></div>
+  </div>
+  <script type="module">
+    import '../js/app.js';
+    import { getRequirementOptions, createRequirementOption, updateRequirementOption } from '../js/api.js';
+    import { dataTable } from '../components/data-table.js';
+    import { formModal } from '../components/modal.js';
+    import { toast } from '../components/toast.js';
+    import { escapeHtml } from '../js/utils.js';
+
+    async function load() {
+      const el = document.getElementById('opts-table');
+      try {
+        const list = await getRequirementOptions(true);
+        dataTable({
+          container: el,
+          columns: [
+            { key: 'name', label: 'Option' },
+            { key: 'description', label: 'Description', render: (r) => escapeHtml(r.description || '—') },
+            { key: 'maxQuantity', label: 'Max qty' },
+            { key: 'totalStock', label: 'Stock', render: (r) => (r.totalStock ?? 'Unlimited') },
+            { key: 'isActive', label: 'Status', render: (r) => (r.isActive ? 'Active' : 'Inactive') },
+            { key: 'actions', label: 'Actions', sortable: false,
+              render: (r) => `<button type="button" class="text-accent hover:underline text-sm btn-edit" data-id="${r.id}">Edit</button>` },
+          ],
+          rows: list,
+          empty: { title: 'No options yet.' },
+        });
+        el.querySelectorAll('.btn-edit').forEach((b) => b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openEdit(list.find((o) => String(o.id) === b.dataset.id));
+        }));
+      } catch (err) {
+        toast(err.message || 'Unable to load options.', 'error');
+      }
+    }
+
+    async function openEdit(o) {
+      const f = 'class="w-full border border-rule rounded-sm px-3 py-2 text-sm"';
+      const lbl = 'class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1"';
+      const data = await formModal({
+        title: o ? 'Edit option' : 'Add option',
+        submitLabel: o ? 'Save' : 'Create',
+        bodyHtml: `<div class="space-y-3">
+          <div><label ${lbl}>Name</label><input name="name" value="${escapeHtml(o?.name || '')}" ${f} required /></div>
+          <div><label ${lbl}>Description</label><input name="description" value="${escapeHtml(o?.description || '')}" ${f} /></div>
+          <div><label ${lbl}>Max quantity</label><input name="maxQuantity" type="number" min="1" value="${o?.maxQuantity || 1}" ${f} /></div>
+          <div><label ${lbl}>Total stock (blank = unlimited)</label><input name="totalStock" type="number" min="0" value="${o?.totalStock ?? ''}" ${f} /></div>
+          <div><label ${lbl}>Sort order</label><input name="sortOrder" type="number" value="${o?.sortOrder || 0}" ${f} /></div>
+          <div><label ${lbl}>Status</label><select name="isActive" ${f}><option value="1" ${o?.isActive === false ? '' : 'selected'}>Active</option><option value="0" ${o?.isActive === false ? 'selected' : ''}>Inactive</option></select></div>
+        </div>`,
+      });
+      if (!data) return;
+      const payload = { ...data, maxQuantity: Number(data.maxQuantity), sortOrder: Number(data.sortOrder), totalStock: data.totalStock === '' ? null : Number(data.totalStock), isActive: data.isActive === '1' };
+      try {
+        if (o) await updateRequirementOption(o.id, payload);
+        else await createRequirementOption(payload);
+        toast('Saved.', 'success');
+        await load();
+      } catch (err) {
+        toast(err.message || 'Save failed.', 'error');
+      }
+    }
+
+    window.__pageInit = async function () {
+      document.getElementById('btn-add').addEventListener('click', () => openEdit(null));
+      await load();
+    };
+  </script>
+</body>
+</html>

@@ -56,7 +56,7 @@
 <body class="bg-paper text-ink font-sans antialiased" data-page-title="Departments">
   <div id="app">
     <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <p class="text-sm text-muted leading-relaxed max-w-2xl">Departments and assigned managers.</p>
+      <p class="text-sm text-muted leading-relaxed max-w-2xl">Manage company departments.</p>
       <button type="button" id="btn-add-dept" class="inline-flex items-center justify-center gap-2 rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 shrink-0">Add department</button>
     </div>
     <div id="depts-table"></div>
@@ -64,9 +64,9 @@
 
   <script type="module">
     import '../js/app.js';
-    import { getDepartments, createDepartment, updateDepartment } from '../js/api.js';
+    import { getDepartments, createDepartment, removeDepartment } from '../js/api.js';
     import { dataTable } from '../components/data-table.js';
-    import { formModal } from '../components/modal.js';
+    import { formModal, confirm } from '../components/modal.js';
     import { toast } from '../components/toast.js';
     import { escapeHtml } from '../js/utils.js';
 
@@ -79,23 +79,36 @@
           container: el,
           columns: [
             { key: 'name', label: 'Department Name' },
-            { key: 'manager', label: 'Assigned Manager', render: (r) => r.managerName || r.manager || '—' },
-            { key: 'status', label: 'Status', render: (r) => r.status || 'Active' },
+            { key: 'status', label: 'Status', render: (r) => (r.isActive === false ? 'Inactive' : 'Active') },
             {
               key: 'actions',
               label: 'Actions',
               sortable: false,
-              render: (r) => `<button type="button" class="text-accent hover:underline text-sm btn-edit" data-id="${escapeHtml(r.id)}">Edit</button>`,
+              render: (r) => `<button type="button" class="text-clay hover:underline text-sm btn-remove" data-id="${escapeHtml(r.id)}">Remove</button>`,
             },
           ],
           rows: list,
           empty: { title: 'No departments found.' },
         });
 
-        el.querySelectorAll('.btn-edit').forEach((btn) => {
-          btn.addEventListener('click', (e) => {
+        el.querySelectorAll('.btn-remove').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            openEdit(list.find((d) => String(d.id) === btn.dataset.id));
+            const d = list.find((x) => String(x.id) === btn.dataset.id);
+            const ok = await confirm({
+              title: 'Remove department',
+              message: `Remove "${d.name}"? Past bookings keep their record.`,
+              confirmLabel: 'Remove',
+              danger: true,
+            });
+            if (!ok) return;
+            try {
+              await removeDepartment(d.id);
+              toast('Department removed.', 'success');
+              await load();
+            } catch (err) {
+              toast(err.message || 'Remove failed.', 'error');
+            }
           });
         });
       } catch {
@@ -115,19 +128,16 @@
               <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Department name</label>
               <input name="name" value="${escapeHtml(dept?.name || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" required />
             </div>
-            <div>
-              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Manager name or ID</label>
-              <input name="managerId" value="${escapeHtml(dept?.managerId || dept?.managerName || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" />
-            </div>
           </div>
         `,
       });
       if (!data) return;
       try {
-        if (isNew) await createDepartment(data);
-        else await updateDepartment(dept.id, data);
-      } catch {
-        toast('Backend not connected yet. Request not sent.', 'error');
+        if (isNew) await createDepartment({ name: data.name });
+        toast('Saved.', 'success');
+        await load();
+      } catch (err) {
+        toast(err.message || 'Save failed.', 'error');
       }
     }
 

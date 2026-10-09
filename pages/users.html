@@ -56,117 +56,132 @@
 <body class="bg-paper text-ink font-sans antialiased" data-page-title="Users">
   <div id="app">
     <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <p class="text-sm text-muted leading-relaxed max-w-2xl">Manage system users and roles.</p>
+      <p class="text-sm text-muted leading-relaxed max-w-2xl">Manage users by role. Edit a user to change their password.</p>
       <button type="button" id="btn-add-user" class="inline-flex items-center justify-center gap-2 rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 shrink-0">Add user</button>
     </div>
+    <div id="role-tabs" class="mb-4 flex flex-wrap gap-1 border-b border-rule" role="tablist"></div>
     <div id="users-table"></div>
   </div>
 
   <script type="module">
     import '../js/app.js';
-    import { getUsers, createUser, updateUser, deactivateUser } from '../js/api.js';
+    import { getUsers, createUser, updateUser, getDepartments } from '../js/api.js';
     import { dataTable } from '../components/data-table.js';
     import { formModal, confirm } from '../components/modal.js';
     import { toast } from '../components/toast.js';
     import { escapeHtml } from '../js/utils.js';
 
-    async function load() {
+    const ROLES = ['Administrator', 'HR', 'Manager', 'Employee'];
+    const LABELS = { Administrator: 'Admin', HR: 'HR', Manager: 'Managers', Employee: 'Employees' };
+    let allUsers = [];
+    let departments = [];
+    let activeRole = 'Administrator';
+
+    function renderTabs() {
+      const box = document.getElementById('role-tabs');
+      box.innerHTML = ROLES.map((r) => {
+        const n = allUsers.filter((u) => u.role === r).length;
+        const on = r === activeRole;
+        return `<button type="button" role="tab" aria-selected="${on}" data-role="${r}" class="px-4 py-2 text-sm -mb-px border-b-2 ${on ? 'border-ink text-ink font-medium' : 'border-transparent text-muted hover:text-ink'}">${LABELS[r]} <span class="ml-1 text-xs text-muted">${n}</span></button>`;
+      }).join('');
+      box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { activeRole = b.dataset.role; renderTabs(); renderTable(); }));
+    }
+
+    function renderTable() {
       const el = document.getElementById('users-table');
+      const list = allUsers.filter((u) => u.role === activeRole);
+      dataTable({
+        container: el,
+        columns: [
+          { key: 'name', label: 'Name' },
+          { key: 'email', label: 'Email' },
+          { key: 'department', label: 'Department', render: (r) => escapeHtml(r.department || '—') },
+          { key: 'isActive', label: 'Status', render: (r) => (r.isActive ? 'Active' : 'Inactive') },
+          {
+            key: 'actions', label: 'Actions', sortable: false,
+            render: (r) => `<button type="button" class="text-accent hover:underline text-sm mr-2 btn-edit" data-id="${r.id}">Edit</button>
+              <button type="button" class="${r.isActive ? 'text-clay' : 'text-accent'} hover:underline text-sm btn-toggle" data-id="${r.id}">${r.isActive ? 'Deactivate' : 'Activate'}</button>`,
+          },
+        ],
+        rows: list,
+        empty: { title: 'No users in this group.' },
+      });
+      el.querySelectorAll('.btn-edit').forEach((btn) => btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openEdit(allUsers.find((u) => String(u.id) === btn.dataset.id));
+      }));
+      el.querySelectorAll('.btn-toggle').forEach((btn) => btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const u = allUsers.find((x) => String(x.id) === btn.dataset.id);
+        if (u.isActive && !(await confirm({ title: 'Deactivate user', message: 'This user will no longer be able to sign in. Continue?', confirmLabel: 'Deactivate', danger: true }))) return;
+        try {
+          await updateUser(u.id, { isActive: !u.isActive });
+          toast(u.isActive ? 'User deactivated.' : 'User activated.', 'success');
+          await load();
+        } catch (err) {
+          toast(err.message || 'Action failed.', 'error');
+        }
+      }));
+    }
+
+    async function load() {
       try {
         const data = await getUsers();
-        const list = Array.isArray(data) ? data : data?.items || [];
-        dataTable({
-          container: el,
-          columns: [
-            { key: 'name', label: 'Name' },
-            { key: 'email', label: 'Email' },
-            { key: 'department', label: 'Department', render: (r) => r.department || r.departmentName || '—' },
-            { key: 'role', label: 'Role' },
-            { key: 'status', label: 'Status', render: (r) => r.status || (r.active === false ? 'Inactive' : 'Active') },
-            {
-              key: 'actions',
-              label: 'Actions',
-              sortable: false,
-              render: (r) => `
-                <button type="button" class="text-accent hover:underline text-sm mr-2 btn-edit" data-id="${escapeHtml(r.id)}">Edit</button>
-                <button type="button" class="text-clay hover:underline text-sm btn-deact" data-id="${escapeHtml(r.id)}">Deactivate</button>
-              `,
-            },
-          ],
-          rows: list,
-          empty: { title: 'No users found.' },
-        });
-
-        el.querySelectorAll('.btn-edit').forEach((btn) => {
-          btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openEdit(list.find((u) => String(u.id) === btn.dataset.id));
-          });
-        });
-        el.querySelectorAll('.btn-deact').forEach((btn) => {
-          btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const ok = await confirm({
-              title: 'Deactivate user',
-              message: 'This user will no longer be able to sign in. Continue?',
-              confirmLabel: 'Deactivate',
-              danger: true,
-            });
-            if (!ok) return;
-            try {
-              await deactivateUser(btn.dataset.id);
-            } catch {
-              toast('Backend not connected yet. Request not sent.', 'error');
-            }
-          });
-        });
-      } catch {
-        dataTable({ container: el, columns: [], rows: [], empty: { title: 'No users found.' } });
-        toast('Unable to load users. Backend not connected yet.', 'error');
+        allUsers = Array.isArray(data) ? data : data?.items || [];
+        renderTabs();
+        renderTable();
+      } catch (err) {
+        toast(err.message || 'Unable to load users.', 'error');
       }
     }
 
     async function openEdit(user) {
       const isNew = !user;
+      const f = 'class="w-full border border-rule rounded-sm px-3 py-2 text-sm"';
+      const lbl = 'class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1"';
+      const role = user?.role || activeRole;
       const data = await formModal({
         title: isNew ? 'Add user' : 'Edit user',
         submitLabel: isNew ? 'Create' : 'Save',
-        bodyHtml: `
-          <div class="space-y-3">
-            <div>
-              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Name</label>
-              <input name="name" value="${escapeHtml(user?.name || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" required />
-            </div>
-            <div>
-              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Email</label>
-              <input name="email" type="email" value="${escapeHtml(user?.email || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" required />
-            </div>
-            <div>
-              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Department</label>
-              <input name="department" value="${escapeHtml(user?.department || user?.departmentName || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Role</label>
-              <select name="role" class="w-full border border-rule rounded-sm px-3 py-2 text-sm">
-                ${['Employee', 'Manager', 'HR', 'Administrator']
-                  .map((r) => `<option ${user?.role === r ? 'selected' : ''}>${r}</option>`)
-                  .join('')}
-              </select>
-            </div>
-          </div>
-        `,
+        bodyHtml: `<div class="space-y-3">
+          <div><label ${lbl}>Name</label><input name="name" value="${escapeHtml(user?.name || '')}" ${f} required /></div>
+          <div><label ${lbl}>Email</label><input name="email" type="email" value="${escapeHtml(user?.email || '')}" ${f} ${isNew ? 'required' : 'readonly'} /></div>
+          <div><label ${lbl}>Department</label><select name="departmentId" ${f}>
+            <option value="">— None —</option>
+            ${departments.map((d) => `<option value="${d.id}" ${user?.departmentId === d.id ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
+          </select></div>
+          <div><label ${lbl}>Role</label><select name="role" ${f}>
+            ${ROLES.map((r) => `<option value="${r}" ${role === r ? 'selected' : ''}>${r}</option>`).join('')}
+          </select></div>
+          <div><label ${lbl}>${isNew ? 'Password' : 'New password'}</label>
+            <input name="password" type="password" autocomplete="new-password" minlength="6" ${f} ${isNew ? 'required' : ''} placeholder="${isNew ? '' : 'Leave blank to keep current password'}" />
+            <p class="text-xs text-muted mt-1">At least 6 characters.</p></div>
+        </div>`,
       });
       if (!data) return;
+      const payload = {
+        name: data.name,
+        role: data.role,
+        departmentId: data.departmentId ? Number(data.departmentId) : null,
+      };
+      if (data.password) payload.password = data.password;
       try {
-        if (isNew) await createUser(data);
-        else await updateUser(user.id, data);
-      } catch {
-        toast('Backend not connected yet. Request not sent.', 'error');
+        if (isNew) await createUser({ ...payload, email: data.email });
+        else await updateUser(user.id, payload);
+        toast('Saved.', 'success');
+        if (payload.role) activeRole = payload.role;
+        await load();
+      } catch (err) {
+        toast(err.message || 'Save failed.', 'error');
       }
     }
 
     window.__pageInit = async function () {
       document.getElementById('btn-add-user').addEventListener('click', () => openEdit(null));
+      try {
+        const d = await getDepartments();
+        departments = (Array.isArray(d) ? d : d?.items || []).filter((x) => x.isActive !== false);
+      } catch { departments = []; }
       await load();
     };
   </script>

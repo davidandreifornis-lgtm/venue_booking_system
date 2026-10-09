@@ -19,7 +19,7 @@ class Permissions
             'user.list_managers',
         ],
         'HR' => [
-            'booking.view_all', 'booking.decide', // approve / decline / reschedule
+            'booking.create', 'booking.view_all', 'booking.decide', // approve / decline / reschedule
             'venue.list', 'venue.view', 'venue.availability',
             'notification.own',
         ],

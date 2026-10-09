@@ -19,7 +19,7 @@ return [
         'allowed_origin' => '',
     ],
     'app' => [
-        'timezone' => 'UTC',
+        'timezone' => 'Asia/Manila',
         'debug' => true,
     ],
 ];

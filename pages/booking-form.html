@@ -89,7 +89,9 @@
           <p class="field-error mt-1 text-xs text-clay hidden" data-for="departmentManagerId"></p>
         </div>
         <div class="sm:col-span-2">
-          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="additionalRequirements">Additional requirements</label>
+          <span class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Additional requirements</span>
+          <div id="requirements-box" class="mb-3 grid gap-2 sm:grid-cols-2"><p class="text-sm text-muted">Loading options…</p></div>
+          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="additionalRequirements">Other notes</label>
           <textarea name="additionalRequirements" id="additionalRequirements" rows="3" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10 resize-y" placeholder="AV, catering, accessibility…"></textarea>
         </div>
       </div>
@@ -107,7 +109,8 @@
   </div>
   <script type="module">
     import '../js/app.js';
-    import { getVenues, getUsers, getBookings, createBooking } from '../js/api.js';
+    import { getVenues, getUsers, getBookings, createBooking, getRequirementOptions } from '../js/api.js';
+    import { escapeHtml } from '../js/utils.js';
     import { pageHeader } from '../js/ui.js';
     import { validateBookingForm, hasVenueConflict } from '../js/validators.js';
     import { toast } from '../components/toast.js';
@@ -170,6 +173,19 @@
         form[id]?.addEventListener('change', checkConflict);
       });
 
+      try {
+        const opts = await getRequirementOptions();
+        const box = document.getElementById('requirements-box');
+        box.innerHTML = opts.length ? opts.map((o) => `
+          <label class="flex items-center gap-2 rounded border border-rule px-3 py-2 text-sm">
+            <input type="checkbox" class="req-check" value="${o.id}" />
+            <span class="flex-1">${escapeHtml(o.name)}${o.description ? `<span class="block text-xs text-muted">${escapeHtml(o.description)}</span>` : ''}</span>
+            ${o.maxQuantity > 1 ? `<input type="number" min="1" max="${o.maxQuantity}" value="1" data-id="${o.id}" class="req-qty w-16 rounded border border-rule px-2 py-1 text-sm" />` : ''}
+          </label>`).join('') : '<p class="text-sm text-muted">No options configured.</p>';
+      } catch {
+        document.getElementById('requirements-box').innerHTML = '<p class="text-sm text-muted">Options unavailable.</p>';
+      }
+
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         document.querySelectorAll('.field-error').forEach((el) => {
@@ -187,6 +203,10 @@
           attendees: form.attendees.value,
           departmentManagerId: form.departmentManagerId.value,
           additionalRequirements: form.additionalRequirements.value.trim(),
+          requirements: [...document.querySelectorAll('#requirements-box .req-check:checked')].map((c) => ({
+            optionId: Number(c.value),
+            quantity: Number(document.querySelector(`#requirements-box .req-qty[data-id="${c.value}"]`)?.value || 1),
+          })),
         };
 
         const errors = validateBookingForm(fields);

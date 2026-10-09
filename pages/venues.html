@@ -56,7 +56,7 @@
 <body class="bg-paper text-ink font-sans antialiased" data-page-title="Venues">
   <div id="app">
     <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <p class="text-sm text-muted leading-relaxed max-w-2xl">Configure venues, capacity, and equipment.</p>
+      <p class="text-sm text-muted leading-relaxed max-w-2xl">Configure venues and capacity. Equipment and extras are set under Requirement Options.</p>
       <button type="button" id="btn-add-venue" class="inline-flex items-center justify-center gap-2 rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 shrink-0">Add venue</button>
     </div>
     <div id="venues-table"></div>
@@ -81,7 +81,6 @@
             { key: 'name', label: 'Venue Name' },
             { key: 'location', label: 'Location' },
             { key: 'capacity', label: 'Capacity' },
-            { key: 'equipment', label: 'Equipment', render: (r) => (Array.isArray(r.equipment) ? r.equipment.join(', ') : r.equipment) || '—' },
             { key: 'status', label: 'Status', render: (r) => r.status || 'Available' },
             {
               key: 'actions',
@@ -154,10 +153,6 @@
             <div>
               <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Description</label>
               <textarea name="description" rows="2" class="w-full border border-rule rounded-sm px-3 py-2 text-sm">${escapeHtml(venue?.description || '')}</textarea>
-            </div>
-            <div>
-              <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Available equipment</label>
-              <input name="equipment" value="${escapeHtml(Array.isArray(venue?.equipment) ? venue.equipment.join(', ') : venue?.equipment || '')}" class="w-full border border-rule rounded-sm px-3 py-2 text-sm" placeholder="Projector, whiteboard…" />
             </div>
             <div>
               <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1">Status</label>

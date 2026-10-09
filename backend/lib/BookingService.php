@@ -4,6 +4,7 @@ require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Settings.php';
 require_once __DIR__ . '/ActivityLog.php';
 require_once __DIR__ . '/NotificationService.php';
+require_once __DIR__ . '/RequirementOptions.php';
 
 class BookingService
 {
@@ -15,11 +16,14 @@ class BookingService
     public const STATUS_RESCHEDULED = 'Rescheduled';
     public const STATUS_CANCELLED = 'Cancelled';
     public const STATUS_COMPLETED = 'Completed';
+    public const STATUS_REVISION = 'Revision Requested';
+    public const STATUS_REJECTED_MANAGER = 'Rejected by Manager';
+    public const STATUS_PROPOSED = 'Reschedule Proposed';
 
     /** Statuses that block venue time (overlap). */
     public static function blockingStatuses(bool $includePending = false): array
     {
-        $s = [self::STATUS_APPROVED, self::STATUS_RESCHEDULED];
+        $s = [self::STATUS_APPROVED, self::STATUS_RESCHEDULED, self::STATUS_PROPOSED];
         if ($includePending) {
             $s[] = self::STATUS_PENDING_MANAGER;
             $s[] = self::STATUS_MANAGER_VALIDATED;
@@ -58,6 +62,11 @@ class BookingService
             'declineReason' => $r['DeclineReason'],
             'createdAt' => $r['CreatedAt'] ?? null,
             'updatedAt' => $r['UpdatedAt'] ?? null,
+            'proposedVenueId' => isset($r['ProposedVenueId']) ? (int)$r['ProposedVenueId'] : null,
+            'proposedDate' => !empty($r['ProposedDate']) ? self::fmtDate($r['ProposedDate']) : null,
+            'proposedStartTime' => !empty($r['ProposedStartTime']) ? self::fmtTime($r['ProposedStartTime']) : null,
+            'proposedEndTime' => !empty($r['ProposedEndTime']) ? self::fmtTime($r['ProposedEndTime']) : null,
+            'proposalNotes' => $r['ProposalNotes'] ?? null,
         ];
     }
 
@@ -102,11 +111,31 @@ class BookingService
         $stmt = $pdo->prepare(self::baseSelect() . ' WHERE b.BookingId = ?');
         $stmt->execute([$id]);
         $row = $stmt->fetch();
-        return $row ? self::mapRow($row) : null;
+        if (!$row) {
+            return null;
+        }
+        $m = self::mapRow($row);
+        $m['requirements'] = RequirementOptions::forBooking($id);
+        return $m;
+    }
+
+    /** Mark past approved bookings as Completed. */
+    public static function completePast(): void
+    {
+        $pdo = Database::pdo();
+        $d = date('Y-m-d');
+        $t = date('H:i:s');
+        $st = [self::STATUS_APPROVED, self::STATUS_RESCHEDULED];
+        $cond = "Status IN (?, ?) AND (BookingDate < ? OR (BookingDate = ? AND EndTime < ?))";
+        $bind = array_merge($st, [$d, $d, $t]);
+        $pdo->prepare("INSERT INTO dbo.BookingStatusHistory (BookingId, FromStatus, ToStatus, ChangedByUserId, Reason)
+                       SELECT BookingId, Status, 'Completed', NULL, 'Auto-completed after event' FROM dbo.Bookings WHERE $cond")->execute($bind);
+        $pdo->prepare("UPDATE dbo.Bookings SET Status = 'Completed', UpdatedAt = SYSUTCDATETIME() WHERE $cond")->execute($bind);
     }
 
     public static function listForUser(array $user, array $params = []): array
     {
+        self::completePast();
         $pdo = Database::pdo();
         $where = ['1=1'];
         $bind = [];
@@ -163,13 +192,13 @@ class BookingService
         }
 
         $date = substr((string)$payload['date'], 0, 10);
-        $today = gmdate('Y-m-d');
+        $today = date('Y-m-d');
         if ($date < $today) {
             $errors['date'] = 'Cannot book a past date.';
         }
 
         $window = (int)(Settings::get('booking_window_days', '90') ?: 90);
-        $maxDate = gmdate('Y-m-d', time() + $window * 86400);
+        $maxDate = date('Y-m-d', time() + $window * 86400);
         if ($date > $maxDate) {
             $errors['date'] = "Bookings cannot be more than {$window} days ahead.";
         }
@@ -232,7 +261,7 @@ class BookingService
 
         $ph = implode(',', array_fill(0, count($statuses), '?'));
         $sql = "SELECT TOP 1 BookingId, ReferenceCode, StartTime, EndTime, Status
-                FROM dbo.Bookings
+                FROM dbo.Bookings WITH (UPDLOCK, HOLDLOCK)
                 WHERE VenueId = ?
                   AND BookingDate = ?
                   AND Status IN ($ph)
@@ -256,6 +285,7 @@ class BookingService
             Response::error(reset($errors), 422, ['errors' => $errors]);
         }
 
+        $reqItems = RequirementOptions::normalize($payload['requirements'] ?? []);
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
@@ -272,9 +302,31 @@ class BookingService
                 Response::error('This venue is already booked for the selected time (ref: ' . $conflict['ReferenceCode'] . ').', 409);
             }
 
+            $stockErr = RequirementOptions::checkStock($reqItems, substr($payload['date'], 0, 10), self::normalizeTime($payload['startTime']), self::normalizeTime($payload['endTime']), null);
+            if ($stockErr) {
+                $pdo->rollBack();
+                Response::error($stockErr, 409);
+            }
             $ref = self::nextReference($pdo);
             $deptId = $user['departmentId'];
             $mgrId = isset($payload['departmentManagerId']) ? (int)$payload['departmentManagerId'] : null;
+            if (!$mgrId && $deptId && $user['role'] === 'Employee') {
+                $q = $pdo->prepare(
+                    "SELECT TOP 1 u.UserId FROM dbo.Users u INNER JOIN dbo.Roles r ON r.RoleId = u.RoleId
+                     WHERE r.RoleCode = 'Manager' AND u.IsActive = 1 AND u.DepartmentId = ? ORDER BY u.UserId"
+                );
+                $q->execute([$deptId]);
+                $mgrId = (int)$q->fetchColumn() ?: null;
+            }
+            // Manager requests skip manager stage; HR/Admin create official (direct) bookings.
+            $initial = self::STATUS_PENDING_MANAGER;
+            if ($user['role'] === 'Manager') {
+                $initial = self::STATUS_PENDING_HR;
+                $mgrId = null;
+            } elseif (in_array($user['role'], ['HR', 'Administrator'], true)) {
+                $initial = self::STATUS_APPROVED;
+                $mgrId = null;
+            }
 
             $stmt = $pdo->prepare(
                 "INSERT INTO dbo.Bookings
@@ -297,16 +349,21 @@ class BookingService
                 $payload['eventType'] ?? null,
                 max(1, (int)($payload['attendees'] ?? 1)),
                 $payload['additionalRequirements'] ?? null,
-                self::STATUS_PENDING_MANAGER,
+                $initial,
             ]);
             $id = (int)$stmt->fetchColumn();
 
-            self::history($pdo, $id, null, self::STATUS_PENDING_MANAGER, $user['id'], 'Submitted');
+            RequirementOptions::attach($pdo, $id, $reqItems);
+            self::history($pdo, $id, null, $initial, $user['id'], $initial === self::STATUS_APPROVED ? 'Official booking (direct)' : 'Submitted');
             $pdo->commit();
 
             ActivityLog::write($user['id'], $user['email'], 'booking.create', 'booking', (string)$id, ['ref' => $ref]);
 
-            // Notify manager
+            if ($initial === self::STATUS_PENDING_HR) {
+                foreach (self::usersByRole('HR') as $hrId) {
+                    NotificationService::notify($hrId, 'Booking ready for HR', 'Request ' . $ref . ' awaits decision.', 'booking-details.html?id=' . $id);
+                }
+            }
             if ($mgrId) {
                 NotificationService::notify(
                     $mgrId,
@@ -334,10 +391,10 @@ class BookingService
         if ($b['status'] !== self::STATUS_PENDING_MANAGER) {
             Response::error('Booking is not awaiting manager validation.', 409);
         }
+        if ($b['requesterId'] === $user['id']) {
+            Response::error('You cannot validate your own request.', 403);
+        }
         if ($user['role'] === 'Manager') {
-            if ($b['requesterId'] === $user['id']) {
-                Response::error('You cannot validate your own request.', 403);
-            }
             if ($user['departmentId'] && $b['departmentId'] && $user['departmentId'] !== $b['departmentId']) {
                 Response::error('You can only validate requests from your department.', 403);
             }
@@ -380,13 +437,19 @@ class BookingService
         if (!in_array($b['status'], [self::STATUS_PENDING_HR, self::STATUS_MANAGER_VALIDATED], true)) {
             Response::error('Booking is not awaiting HR decision.', 409);
         }
-        if ($b['requesterId'] === $user['id'] && $user['role'] !== 'Administrator') {
+        if ($b['requesterId'] === $user['id']) {
             Response::error('You cannot approve your own request.', 403);
         }
 
         $conflict = self::findConflict($b['venueId'], $b['date'], $b['startTime'], $b['endTime'], $id);
         if ($conflict) {
             Response::error('Cannot approve: venue conflict with ' . $conflict['ReferenceCode'] . '.', 409);
+        }
+
+        $reqs = array_map(static fn($r) => [$r['optionId'], $r['name'], $r['quantity']], RequirementOptions::forBooking($id));
+        $stockErr = RequirementOptions::checkStock($reqs, $b['date'], self::normalizeTime($b['startTime']), self::normalizeTime($b['endTime']), $id);
+        if ($stockErr) {
+            Response::error('Cannot approve: ' . $stockErr, 409);
         }
 
         $pdo = Database::pdo();
@@ -419,6 +482,10 @@ class BookingService
             Response::error('Booking cannot be declined in its current status.', 409);
         }
 
+        if ($b['requesterId'] === $user['id']) {
+            Response::error('You cannot decline your own request.', 403);
+        }
+        $newStatus = ($user['role'] === 'Manager') ? self::STATUS_REJECTED_MANAGER : self::STATUS_DECLINED;
         $pdo = Database::pdo();
         $pdo->prepare(
             "UPDATE dbo.Bookings SET Status = ?, DeclineReason = ?, HrNotes = COALESCE(?, HrNotes),
@@ -426,7 +493,7 @@ class BookingService
                 DecidedAt = SYSUTCDATETIME(), DecidedByUserId = ?, UpdatedAt = SYSUTCDATETIME()
              WHERE BookingId = ?"
         )->execute([
-            self::STATUS_DECLINED,
+            $newStatus,
             $reason,
             $payload['notes'] ?? $reason,
             $user['role'],
@@ -434,7 +501,7 @@ class BookingService
             $user['id'],
             $id,
         ]);
-        self::history($pdo, $id, $b['status'], self::STATUS_DECLINED, $user['id'], $reason);
+        self::history($pdo, $id, $b['status'], $newStatus, $user['id'], $reason);
 
         ActivityLog::write($user['id'], $user['email'], 'booking.decline', 'booking', (string)$id, ['reason' => $reason]);
         NotificationService::notify($b['requesterId'], 'Booking declined', 'Your booking ' . $b['ref'] . ' was declined.', 'booking-details.html?id=' . $id);
@@ -442,49 +509,178 @@ class BookingService
         return self::getById($id);
     }
 
+    /** HR/Admin proposes a new schedule. The original schedule is kept until the requester accepts. */
     public static function reschedule(array $user, int $id, array $payload): array
     {
         $b = self::getById($id);
         if (!$b) {
             Response::error('Booking not found.', 404);
         }
-        if (!in_array($b['status'], [self::STATUS_PENDING_HR, self::STATUS_MANAGER_VALIDATED, self::STATUS_APPROVED], true)) {
+        if (!in_array($b['status'], [self::STATUS_PENDING_HR, self::STATUS_APPROVED], true)) {
             Response::error('Booking cannot be rescheduled in its current status.', 409);
         }
-
+        if ($b['requesterId'] === $user['id']) {
+            Response::error('You cannot propose a reschedule for your own request.', 403);
+        }
         $merged = array_merge($b, [
             'venueId' => $payload['venueId'] ?? $b['venueId'],
             'date' => $payload['date'] ?? $b['date'],
             'startTime' => $payload['startTime'] ?? $b['startTime'],
             'endTime' => $payload['endTime'] ?? $b['endTime'],
-            'attendees' => $payload['attendees'] ?? $b['attendees'],
-            'purpose' => $b['purpose'],
         ]);
         $errors = self::validatePayload($merged, $id);
         if ($errors) {
             Response::error(reset($errors), 422, ['errors' => $errors]);
         }
-
         $pdo = Database::pdo();
         $pdo->prepare(
-            "UPDATE dbo.Bookings SET VenueId = ?, BookingDate = ?, StartTime = ?, EndTime = ?,
-                Status = ?, HrNotes = COALESCE(?, HrNotes), DecidedAt = SYSUTCDATETIME(),
-                DecidedByUserId = ?, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+            "UPDATE dbo.Bookings SET ProposedVenueId = ?, ProposedDate = ?, ProposedStartTime = ?, ProposedEndTime = ?,
+                ProposalNotes = ?, StatusBeforeProposal = ?, Status = ?, DecidedByUserId = ?, UpdatedAt = SYSUTCDATETIME()
+             WHERE BookingId = ?"
         )->execute([
-            (int)$merged['venueId'],
-            substr($merged['date'], 0, 10),
-            self::normalizeTime($merged['startTime']),
-            self::normalizeTime($merged['endTime']),
-            self::STATUS_RESCHEDULED,
-            $payload['notes'] ?? null,
-            $user['id'],
-            $id,
+            (int)$merged['venueId'], substr($merged['date'], 0, 10),
+            self::normalizeTime($merged['startTime']), self::normalizeTime($merged['endTime']),
+            $payload['notes'] ?? null, $b['status'], self::STATUS_PROPOSED, $user['id'], $id,
         ]);
-        self::history($pdo, $id, $b['status'], self::STATUS_RESCHEDULED, $user['id'], $payload['notes'] ?? null);
+        $desc = 'Original: ' . $b['date'] . ' ' . $b['startTime'] . '-' . $b['endTime'] . ' (venue ' . $b['venueId'] . '); proposed: '
+            . substr($merged['date'], 0, 10) . ' ' . $merged['startTime'] . '-' . $merged['endTime'] . ' (venue ' . $merged['venueId'] . '). ' . ($payload['notes'] ?? '');
+        self::history($pdo, $id, $b['status'], self::STATUS_PROPOSED, $user['id'], $desc);
+        ActivityLog::write($user['id'], $user['email'], 'booking.reschedule_proposed', 'booking', (string)$id, null);
+        NotificationService::notify($b['requesterId'], 'Reschedule proposed', 'A new schedule was proposed for ' . $b['ref'] . '. Please respond.', 'booking-details.html?id=' . $id);
+        return self::getById($id);
+    }
 
-        ActivityLog::write($user['id'], $user['email'], 'booking.reschedule', 'booking', (string)$id, null);
-        NotificationService::notify($b['requesterId'], 'Booking rescheduled', 'Your booking ' . $b['ref'] . ' was rescheduled.', 'booking-details.html?id=' . $id);
+    /** Requester accepts or rejects a proposal. */
+    public static function respondReschedule(array $user, int $id, array $payload): array
+    {
+        $b = self::getById($id);
+        if (!$b) {
+            Response::error('Booking not found.', 404);
+        }
+        if ($b['requesterId'] !== $user['id']) {
+            Response::error('Forbidden.', 403);
+        }
+        if ($b['status'] !== self::STATUS_PROPOSED) {
+            Response::error('No reschedule proposal is pending.', 409);
+        }
+        $pdo = Database::pdo();
+        $prev = $pdo->prepare('SELECT StatusBeforeProposal FROM dbo.Bookings WHERE BookingId = ?');
+        $prev->execute([$id]);
+        $prevStatus = $prev->fetchColumn() ?: self::STATUS_PENDING_HR;
+        $accept = !empty($payload['accept']);
 
+        if ($accept) {
+            $pv = (int)$b['proposedVenueId'];
+            $errors = self::validatePayload([
+                'venueId' => $pv, 'date' => $b['proposedDate'], 'startTime' => $b['proposedStartTime'],
+                'endTime' => $b['proposedEndTime'], 'purpose' => $b['purpose'], 'attendees' => $b['attendees'],
+            ], $id);
+            if ($errors) {
+                Response::error('Proposal no longer available: ' . reset($errors), 409);
+            }
+            $pdo->beginTransaction();
+            try {
+                if (self::findConflict($pv, $b['proposedDate'], $b['proposedStartTime'], $b['proposedEndTime'], $id)) {
+                    $pdo->rollBack();
+                    Response::error('Proposal no longer available (conflict).', 409);
+                }
+                $pdo->prepare(
+                    "UPDATE dbo.Bookings SET VenueId = ?, BookingDate = ?, StartTime = ?, EndTime = ?, Status = ?,
+                        ProposedVenueId = NULL, ProposedDate = NULL, ProposedStartTime = NULL, ProposedEndTime = NULL,
+                        StatusBeforeProposal = NULL, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+                )->execute([$pv, $b['proposedDate'], self::normalizeTime($b['proposedStartTime']), self::normalizeTime($b['proposedEndTime']), self::STATUS_APPROVED, $id]);
+                self::history($pdo, $id, self::STATUS_PROPOSED, self::STATUS_APPROVED, $user['id'], 'Requester accepted proposed schedule');
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        } elseif ($prevStatus === self::STATUS_PENDING_HR) {
+            // Not accepted -> declined (original schedule stays recorded in history)
+            $reason = trim((string)($payload['reason'] ?? '')) ?: 'Reschedule proposal not accepted by requester';
+            $pdo->prepare(
+                "UPDATE dbo.Bookings SET Status = ?, DeclineReason = ?, DecidedAt = SYSUTCDATETIME(),
+                    ProposedVenueId = NULL, ProposedDate = NULL, ProposedStartTime = NULL, ProposedEndTime = NULL,
+                    StatusBeforeProposal = NULL, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+            )->execute([self::STATUS_DECLINED, $reason, $id]);
+            self::history($pdo, $id, self::STATUS_PROPOSED, self::STATUS_DECLINED, $user['id'], $reason);
+        } else {
+            $pdo->prepare(
+                "UPDATE dbo.Bookings SET Status = ?, ProposedVenueId = NULL, ProposedDate = NULL, ProposedStartTime = NULL,
+                    ProposedEndTime = NULL, StatusBeforeProposal = NULL, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+            )->execute([$prevStatus, $id]);
+            self::history($pdo, $id, self::STATUS_PROPOSED, $prevStatus, $user['id'], 'Requester rejected proposal; original schedule retained');
+        }
+        ActivityLog::write($user['id'], $user['email'], 'booking.reschedule_response', 'booking', (string)$id, ['accept' => $accept]);
+        foreach (self::usersByRole('HR') as $hrId) {
+            NotificationService::notify($hrId, 'Reschedule ' . ($accept ? 'accepted' : 'rejected'), 'Requester responded for ' . $b['ref'] . '.', 'booking-details.html?id=' . $id);
+        }
+        return self::getById($id);
+    }
+
+    /** Manager asks the requester to revise. */
+    public static function requestRevision(array $user, int $id, array $payload): array
+    {
+        $b = self::getById($id);
+        if (!$b) {
+            Response::error('Booking not found.', 404);
+        }
+        if ($b['status'] !== self::STATUS_PENDING_MANAGER) {
+            Response::error('Booking is not awaiting manager validation.', 409);
+        }
+        if ($b['requesterId'] === $user['id']) {
+            Response::error('You cannot act on your own request.', 403);
+        }
+        if ($user['role'] === 'Manager' && $user['departmentId'] && $b['departmentId'] && $user['departmentId'] !== $b['departmentId']) {
+            Response::error('You can only review requests from your department.', 403);
+        }
+        $notes = trim((string)($payload['notes'] ?? $payload['reason'] ?? ''));
+        if ($notes === '') {
+            Response::error('Revision comments are required.', 422);
+        }
+        $pdo = Database::pdo();
+        $pdo->prepare("UPDATE dbo.Bookings SET Status = ?, ManagerNotes = ?, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?")
+            ->execute([self::STATUS_REVISION, $notes, $id]);
+        self::history($pdo, $id, $b['status'], self::STATUS_REVISION, $user['id'], $notes);
+        ActivityLog::write($user['id'], $user['email'], 'booking.request_revision', 'booking', (string)$id, null);
+        NotificationService::notify($b['requesterId'], 'Revision requested', 'Please revise ' . $b['ref'] . ': ' . $notes, 'booking-details.html?id=' . $id);
+        return self::getById($id);
+    }
+
+    /** Requester edits and resubmits after a revision request. */
+    public static function resubmit(array $user, int $id, array $payload): array
+    {
+        $b = self::getById($id);
+        if (!$b) {
+            Response::error('Booking not found.', 404);
+        }
+        if ($b['requesterId'] !== $user['id']) {
+            Response::error('Forbidden.', 403);
+        }
+        if ($b['status'] !== self::STATUS_REVISION) {
+            Response::error('Only bookings with requested revisions can be edited.', 409);
+        }
+        $m = array_merge($b, array_intersect_key($payload, array_flip(['venueId', 'date', 'startTime', 'endTime', 'purpose', 'eventType', 'attendees', 'additionalRequirements'])));
+        $errors = self::validatePayload($m, $id);
+        if ($errors) {
+            Response::error(reset($errors), 422, ['errors' => $errors]);
+        }
+        $next = $user['role'] === 'Manager' ? self::STATUS_PENDING_HR : self::STATUS_PENDING_MANAGER;
+        $pdo = Database::pdo();
+        $pdo->prepare(
+            "UPDATE dbo.Bookings SET VenueId = ?, BookingDate = ?, StartTime = ?, EndTime = ?, Purpose = ?, EventType = ?,
+                Attendees = ?, AdditionalRequirements = ?, Status = ?, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+        )->execute([
+            (int)$m['venueId'], substr($m['date'], 0, 10), self::normalizeTime($m['startTime']), self::normalizeTime($m['endTime']),
+            trim($m['purpose']), $m['eventType'] ?? null, max(1, (int)$m['attendees']), $m['additionalRequirements'] ?? null, $next, $id,
+        ]);
+        self::history($pdo, $id, self::STATUS_REVISION, $next, $user['id'], 'Revised and resubmitted');
+        ActivityLog::write($user['id'], $user['email'], 'booking.resubmit', 'booking', (string)$id, null);
+        if ($b['departmentManagerId'] && $next === self::STATUS_PENDING_MANAGER) {
+            NotificationService::notify($b['departmentManagerId'], 'Request resubmitted', $b['ref'] . ' was revised.', 'booking-details.html?id=' . $id);
+        }
         return self::getById($id);
     }
 
@@ -502,7 +698,7 @@ class BookingService
             Response::error('Forbidden.', 403);
         }
 
-        $terminal = [self::STATUS_CANCELLED, self::STATUS_COMPLETED, self::STATUS_DECLINED];
+        $terminal = [self::STATUS_CANCELLED, self::STATUS_COMPLETED, self::STATUS_DECLINED, self::STATUS_REJECTED_MANAGER];
         if (in_array($b['status'], $terminal, true)) {
             Response::error('Booking is already closed.', 409);
         }
@@ -519,6 +715,19 @@ class BookingService
         self::history($pdo, $id, $b['status'], self::STATUS_CANCELLED, $user['id'], $reason ?: null);
 
         ActivityLog::write($user['id'], $user['email'], 'booking.cancel', 'booking', (string)$id, null);
+        $notify = [];
+        if (in_array($b['status'], [self::STATUS_APPROVED, self::STATUS_RESCHEDULED, self::STATUS_PENDING_HR, self::STATUS_PROPOSED], true)) {
+            $notify = self::usersByRole('HR');
+        }
+        if ($b['departmentManagerId']) {
+            $notify[] = $b['departmentManagerId'];
+        }
+        if (!$isOwner) {
+            $notify[] = $b['requesterId'];
+        }
+        foreach (array_unique(array_diff($notify, [$user['id']])) as $uid) {
+            NotificationService::notify((int)$uid, 'Booking cancelled', $b['ref'] . ' was cancelled.', 'booking-details.html?id=' . $id);
+        }
         return self::getById($id);
     }
 
@@ -532,8 +741,8 @@ class BookingService
 
     private static function nextReference(PDO $pdo): string
     {
-        $year = gmdate('Y');
-        $stmt = $pdo->query("SELECT COUNT(*) FROM dbo.Bookings WHERE ReferenceCode LIKE 'VB-{$year}-%'");
+        $year = date('Y');
+        $stmt = $pdo->query("SELECT ISNULL(MAX(CAST(RIGHT(ReferenceCode, 4) AS INT)), 0) FROM dbo.Bookings WITH (UPDLOCK, HOLDLOCK) WHERE ReferenceCode LIKE 'VB-{$year}-%'");
         $n = (int)$stmt->fetchColumn() + 1;
         return sprintf('VB-%s-%04d', $year, $n);
     }

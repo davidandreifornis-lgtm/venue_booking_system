@@ -97,6 +97,18 @@ export function rescheduleBooking(id, payload) {
   return request('POST', `/bookings/${id}/reschedule`, payload);
 }
 
+export function requestRevision(id, payload) {
+  return request('POST', `/bookings/${id}/request-revision`, payload);
+}
+
+export function respondReschedule(id, payload) {
+  return request('POST', `/bookings/${id}/respond-reschedule`, payload);
+}
+
+export function resubmitBooking(id, payload) {
+  return request('PUT', `/bookings/${id}`, payload);
+}
+
 export function cancelBooking(id, payload) {
   return request('POST', `/bookings/${id}/cancel`, payload);
 }
@@ -145,6 +157,17 @@ export function deactivateUser(id) {
   return request('POST', `/users/${id}/deactivate`);
 }
 
+// ── Requirement options ─────────────────────────────────
+export function getRequirementOptions(all = false) {
+  return request('GET', `/requirement-options${all ? '?all=1' : ''}`);
+}
+export function createRequirementOption(payload) {
+  return request('POST', '/requirement-options', payload);
+}
+export function updateRequirementOption(id, payload) {
+  return request('PUT', `/requirement-options/${id}`, payload);
+}
+
 // ── Departments ─────────────────────────────────────────
 export function getDepartments(params = {}) {
   const q = new URLSearchParams(params).toString();
@@ -157,6 +180,10 @@ export function createDepartment(payload) {
 
 export function updateDepartment(id, payload) {
   return request('PUT', `/departments/${id}`, payload);
+}
+
+export function removeDepartment(id) {
+  return request('POST', `/departments/${id}/remove`);
 }
 
 export function assignManager(id, managerId) {

@@ -41,6 +41,7 @@ const NAV = {
     { section: 'Manage' },
     { href: 'users.html', label: 'Users', icon: 'users' },
     { href: 'departments.html', label: 'Departments', icon: 'building' },
+    { href: 'requirement-options.html', label: 'Requirement Options', icon: 'settings' },
     { href: 'venues.html', label: 'Venues', icon: 'map' },
     { href: 'all-bookings.html', label: 'All Bookings', icon: 'list' },
     { section: 'System' },
