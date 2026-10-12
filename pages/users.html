@@ -168,7 +168,7 @@
       try {
         if (isNew) await createUser({ ...payload, email: data.email });
         else await updateUser(user.id, payload);
-        toast('Saved.', 'success');
+        toast(isNew ? 'User created.' : 'User updated.', 'success');
         if (payload.role) activeRole = payload.role;
         await load();
       } catch (err) {

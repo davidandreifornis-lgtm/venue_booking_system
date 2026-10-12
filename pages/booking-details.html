@@ -69,7 +69,7 @@
     import { timeline } from '../components/timeline.js';
     import { emptyState } from '../components/empty-state.js';
     import { openModal, closeModal, confirm } from '../components/modal.js';
-    import { toast } from '../components/toast.js';
+    import { toast, flash } from '../components/toast.js';
 
     window.__pageInit = async function () {
       const { id } = parseQuery();
@@ -155,12 +155,7 @@
         document.getElementById('act-validate')?.addEventListener('click', async () => {
           const ok = await confirm({ title: 'Validate request', message: 'Confirm this request is valid and ready for HR review?', confirmLabel: 'Validate' });
           if (!ok) return;
-          try {
-            await validateBooking(id, { notes: '' });
-            toast('Backend not connected yet. Request not sent.', 'error');
-          } catch {
-            toast('Backend not connected yet. Request not sent.', 'error');
-          }
+          run(() => validateBooking(id, { notes: '' }), `Request ${booking.ref} validated and sent to HR for the final decision.`);
         });
         document.getElementById('act-reject')?.addEventListener('click', async () => {
           openModal({
@@ -179,19 +174,19 @@
             const notes = document.getElementById('mgr-notes')?.value?.trim();
             if (!notes) return;
             closeModal();
-            try {
-              await declineBooking(id, { reason: notes });
-              location.reload();
-            } catch (err) {
-              toast(err.message || 'Action failed.', 'error');
-            }
+            run(() => declineBooking(id, { reason: notes }), `Request ${booking.ref} rejected. The requester can see your note.`);
           });
         });
       }
 
       const run = async (fn, msg) => {
-        try { await fn(); toast(msg, 'success'); setTimeout(() => location.reload(), 600); }
-        catch (err) { toast(err.message || 'Action failed.', 'error'); }
+        try {
+          await fn();
+          flash(msg, 'success'); // shown again after the reload so it isn't lost
+          location.reload();
+        } catch (err) {
+          toast(err.message || 'Action failed.', 'error');
+        }
       };
       const isOwner = session()?.id === booking.requesterId;
       const fld = 'class="w-full border border-rule rounded-sm px-3 py-2 text-sm"';
@@ -209,7 +204,7 @@
           const notes = document.getElementById('rev-notes')?.value?.trim();
           if (!notes) return;
           closeModal();
-          run(() => requestRevision(id, { notes }), 'Revision requested.');
+          run(() => requestRevision(id, { notes }), `Revision requested for ${booking.ref}. The requester has been notified.`);
         });
       });
 
@@ -218,9 +213,9 @@
           <p class="w-full text-sm mb-2">HR proposed: <strong>${formatDate(booking.proposedDate)}</strong>, ${formatTime(booking.proposedStartTime)} – ${formatTime(booking.proposedEndTime)}${booking.proposalNotes ? ' — ' + escapeHtml(booking.proposalNotes) : ''}</p>
           <button type="button" id="act-accept" class="px-4 py-2 text-sm bg-accent text-paper rounded-sm">Accept new schedule</button>
           <button type="button" id="act-refuse" class="px-4 py-2 text-sm border border-clay text-clay rounded-sm">Reject (booking will be declined)</button>`;
-        document.getElementById('act-accept').addEventListener('click', () => run(() => respondReschedule(id, { accept: true }), 'Schedule accepted.'));
+        document.getElementById('act-accept').addEventListener('click', () => run(() => respondReschedule(id, { accept: true }), `You accepted the new schedule for ${booking.ref}.`));
         document.getElementById('act-refuse').addEventListener('click', async () => {
-          if (await confirm({ title: 'Reject proposal?', message: 'Rejecting will decline this booking request.' })) run(() => respondReschedule(id, { accept: false }), 'Proposal rejected.');
+          if (await confirm({ title: 'Reject proposal?', message: 'Rejecting will decline this booking request.' })) run(() => respondReschedule(id, { accept: false }), `You rejected the proposal, so ${booking.ref} was declined.`);
         });
       }
 
@@ -241,7 +236,7 @@
           document.getElementById('e-ok')?.addEventListener('click', () => {
             const g = (x) => document.getElementById(x).value;
             closeModal();
-            run(() => resubmitBooking(id, { date: g('e-date'), startTime: g('e-start'), endTime: g('e-end'), attendees: Number(g('e-att')), purpose: g('e-purpose') }), 'Resubmitted.');
+            run(() => resubmitBooking(id, { date: g('e-date'), startTime: g('e-start'), endTime: g('e-end'), attendees: Number(g('e-att')), purpose: g('e-purpose') }), `${booking.ref} was resubmitted for review.`);
           });
         });
       }
@@ -270,11 +265,7 @@
           document.getElementById('confirm-approve')?.addEventListener('click', async () => {
             const notes = document.getElementById('hr-note')?.value?.trim() || '';
             closeModal();
-            try {
-              await approveBooking(id, { notes });
-            } catch {
-              toast('Backend not connected yet. Request not sent.', 'error');
-            }
+            run(() => approveBooking(id, { notes }), `Booking ${booking.ref} approved. The requester has been notified.`);
           });
         });
 
@@ -299,11 +290,7 @@
               return;
             }
             closeModal();
-            try {
-              await declineBooking(id, { reason });
-            } catch {
-              toast('Backend not connected yet. Request not sent.', 'error');
-            }
+            run(() => declineBooking(id, { reason }), `Booking ${booking.ref} declined. The requester has been notified.`);
           });
         });
 
@@ -346,11 +333,7 @@
               return;
             }
             closeModal();
-            try {
-              await rescheduleBooking(id, { date, startTime, endTime, reason, notes: reason });
-            } catch {
-              toast('Backend not connected yet. Request not sent.', 'error');
-            }
+            run(() => rescheduleBooking(id, { date, startTime, endTime, reason, notes: reason }), `New schedule proposed for ${booking.ref}. The requester was asked to respond.`);
           });
         });
       }

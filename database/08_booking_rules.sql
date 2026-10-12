@@ -1,11 +1,9 @@
 /*
   Booking rules for the calendar booking UI. Safe to re-run: it only INSERTS
   missing keys and never overwrites values the admin already changed.
-  Run after 01-07.
+  Run after 01-07. No GO separators, so it works in SSMS, Azure Data Studio, DBeaver, HeidiSQL or any ODBC tool.
 */
 USE VenueBooking;
-GO
-
 MERGE dbo.Settings AS t
 USING (VALUES
   (N'booking_lead_days',       N'2',     N'Minimum days in advance a Employee/Manager must book'),
@@ -23,12 +21,7 @@ ON t.SettingKey = s.SettingKey
 WHEN NOT MATCHED THEN
   INSERT (SettingKey, SettingValue, Description, UpdatedAt)
   VALUES (s.SettingKey, s.SettingValue, s.Description, SYSUTCDATETIME());
-GO
-
 /* Company hours are 8:00 AM - 5:00 PM: move any old 18:00 closing time. */
 UPDATE dbo.Settings SET SettingValue = N'17:00', UpdatedAt = SYSUTCDATETIME()
 WHERE SettingKey = N'operating_hours_end' AND SettingValue = N'18:00';
-GO
-
 PRINT N'Booking rules settings ready.';
-GO

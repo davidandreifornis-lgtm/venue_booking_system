@@ -99,6 +99,25 @@
         <a href="my-requests.html" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-muted hover:text-ink hover:bg-rule/40 transition-colors duration-150">Cancel</a>
       </div>
     </form>
+
+    <section id="submit-success" class="hidden max-w-xl" aria-live="polite">
+      <div class="rounded border border-rule bg-paper p-6">
+        <div class="mb-4 flex items-center gap-3">
+          <span class="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-lg text-paper">✓</span>
+          <div>
+            <h2 class="font-display text-2xl font-medium tracking-[-0.02em]">Request submitted</h2>
+            <p class="text-sm text-muted">Your booking was recorded. You don't need to submit it again.</p>
+          </div>
+        </div>
+        <dl id="success-details" class="mb-5 grid grid-cols-[110px_1fr] gap-x-4 gap-y-2 text-sm"></dl>
+        <p id="success-next" class="mb-5 rounded bg-rule/30 px-3 py-2 text-sm"></p>
+        <div class="flex flex-wrap gap-3">
+          <a id="success-view" href="my-requests.html" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150">View this request</a>
+          <a href="my-requests.html" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium border border-rule hover:bg-rule/40 transition-colors duration-150">My requests</a>
+          <a href="booking-form.html" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-muted hover:text-ink hover:bg-rule/40 transition-colors duration-150">Book another</a>
+        </div>
+      </div>
+    </section>
   </div>
   <script type="module">
     import '../js/app.js';
@@ -108,6 +127,7 @@
     import { validateBookingForm } from '../js/validators.js';
     import { mountBookingCalendar } from '../components/booking-calendar.js';
     import { toast } from '../components/toast.js';
+    import { formatDate, formatTime } from '../js/utils.js';
 
     window.__pageInit = async function () {
       document.getElementById('page-header').innerHTML = pageHeader({
@@ -231,6 +251,28 @@
         reqBox.innerHTML = '<p class="text-sm text-muted">Options unavailable.</p>';
       }
 
+      function showConfirmation(b, f) {
+        const ref = b?.ref || '(reference pending)';
+        const next = {
+          'Pending Manager Validation': 'Next: your department manager validates the request, then HR makes the final decision. You will get a notification at each step.',
+          'Pending HR Decision': 'Next: HR reviews your request and makes the final decision. You will get a notification.',
+          Approved: 'This booking is already approved. The venue is reserved for you.',
+        }[b?.status] || 'You can follow its progress under My requests.';
+        const row = (k, v) => `<dt class="text-muted">${k}</dt><dd class="font-medium">${escapeHtml(String(v ?? '—'))}</dd>`;
+        document.getElementById('success-details').innerHTML =
+          row('Reference', ref) +
+          row('Venue', b?.venueName) +
+          row('Date', b?.date ? formatDate(b.date) : f.date) +
+          row('Time', `${formatTime(b?.startTime || f.startTime)} – ${formatTime(b?.endTime || f.endTime)}`) +
+          row('Status', b?.status);
+        document.getElementById('success-next').textContent = next;
+        if (b?.id) document.getElementById('success-view').href = `booking-details.html?id=${encodeURIComponent(b.id)}`;
+        form.classList.add('hidden');
+        document.getElementById('submit-success').classList.remove('hidden');
+        toast(`Request ${ref} submitted successfully.`, 'success');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         document.querySelectorAll('.field-error').forEach((el) => {
@@ -269,10 +311,11 @@
         const btn = document.getElementById('submit-btn');
         btn.disabled = true;
         btn.textContent = 'Submitting…';
+        let saved = false;
         try {
-          await createBooking(fields);
-          toast('Request submitted.', 'success');
-          window.location.href = '/pages/my-requests.html';
+          const booking = await createBooking(fields);
+          saved = true; // keep the button disabled so it can't be sent twice
+          showConfirmation(booking, fields);
         } catch (err) {
           if (err.status === 409 || err.status === 422) {
             conflictText.textContent = err.message;
@@ -283,8 +326,10 @@
             toast(err.message || 'Could not submit the request.', 'error');
           }
         } finally {
-          btn.disabled = false;
-          btn.textContent = 'Submit request';
+          if (!saved) {
+            btn.disabled = false;
+            btn.textContent = 'Submit request';
+          }
         }
       });
     };

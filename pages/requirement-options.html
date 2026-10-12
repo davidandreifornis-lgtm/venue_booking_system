@@ -120,7 +120,7 @@
       try {
         if (o) await updateRequirementOption(o.id, payload);
         else await createRequirementOption(payload);
-        toast('Saved.', 'success');
+        toast(o ? 'Option updated.' : 'Option created.', 'success');
         await load();
       } catch (err) {
         toast(err.message || 'Save failed.', 'error');

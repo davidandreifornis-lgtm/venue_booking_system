@@ -71,7 +71,7 @@
           ],
           rows: list,
           empty: { title: 'No booking requests found.' },
-          onRowClick: (row) => { window.location.href = `/pages/booking-details.html?id=${encodeURIComponent(row.id)}`; },
+          onRowClick: (row) => { window.location.href = `booking-details.html?id=${encodeURIComponent(row.id)}`; },
         });
       } catch {
         dataTable({ container: el, columns: [], rows: [], empty: { title: 'No booking requests found.' } });

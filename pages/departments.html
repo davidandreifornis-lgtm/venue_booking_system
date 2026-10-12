@@ -64,7 +64,7 @@
 
   <script type="module">
     import '../js/app.js';
-    import { getDepartments, createDepartment, removeDepartment } from '../js/api.js';
+    import { getDepartments, createDepartment, removeDepartment, updateDepartment } from '../js/api.js';
     import { dataTable } from '../components/data-table.js';
     import { formModal, confirm } from '../components/modal.js';
     import { toast } from '../components/toast.js';
@@ -134,7 +134,8 @@
       if (!data) return;
       try {
         if (isNew) await createDepartment({ name: data.name });
-        toast('Saved.', 'success');
+        else await updateDepartment(dept.id, { name: data.name });
+        toast(isNew ? 'Department created.' : 'Department updated.', 'success');
         await load();
       } catch (err) {
         toast(err.message || 'Save failed.', 'error');

@@ -114,8 +114,10 @@
             if (!ok) return;
             try {
               await deactivateVenue(btn.dataset.id);
-            } catch {
-              toast('Backend not connected yet. Request not sent.', 'error');
+              toast('Venue deactivated. It can no longer be booked.', 'success');
+              await load();
+            } catch (err) {
+              toast(err.message || 'Could not deactivate the venue.', 'error');
             }
           });
         });
@@ -168,8 +170,10 @@
       try {
         if (isNew) await createVenue(data);
         else await updateVenue(venue.id, data);
-      } catch {
-        toast('Backend not connected yet. Request not sent.', 'error');
+        toast(isNew ? 'Venue created.' : 'Venue updated.', 'success');
+        await load();
+      } catch (err) {
+        toast(err.message || 'Could not save the venue.', 'error');
       }
     }
 

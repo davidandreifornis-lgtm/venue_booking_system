@@ -6,6 +6,7 @@
 import { loadSession, isAuthed, role } from './auth.js';
 import { renderSidebar, openDrawer, closeDrawer } from '../components/sidebar.js';
 import { renderHeader } from '../components/header.js';
+import { showFlash } from '../components/toast.js';
 
 const PUBLIC = ['login.html'];
 
@@ -28,6 +29,8 @@ export async function boot() {
   if (!isPublicPath(path)) {
     injectShell();
   }
+
+  showFlash(); // confirmation queued by the previous page (after a reload / redirect)
 
   if (typeof window.__pageInit === 'function') {
     try {
