@@ -198,6 +198,18 @@ function route(string $method, string $path, array $body): void
         $all = !empty($_GET['all']) && Permissions::can($user, 'settings.manage');
         Response::json(RequirementOptions::list($all));
     }
+    if ($path === '/requirement-options/availability' && $method === 'GET') {
+        Auth::requireUser();
+        $vid = (int)($_GET['venueId'] ?? 0);
+        $date = (string)($_GET['date'] ?? '');
+        $st = (string)($_GET['startTime'] ?? '');
+        $en = (string)($_GET['endTime'] ?? '');
+        $okTime = static fn($t) => preg_match('/^([01]\d|2[0-3]):[0-5]\d/', $t) === 1;
+        if ($vid < 1 || preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1 || !$okTime($st) || !$okTime($en) || substr($en, 0, 5) <= substr($st, 0, 5)) {
+            Response::error('venueId, date, startTime and endTime are required.', 422);
+        }
+        Response::json(RequirementOptions::availability($vid, $date, substr($st, 0, 5), substr($en, 0, 5)));
+    }
     if ($path === '/requirement-options' && $method === 'POST') {
         $user = Auth::requireUser();
         Permissions::require($user, 'settings.manage');
@@ -255,6 +267,13 @@ function route(string $method, string $path, array $body): void
         } catch (PDOException $e) {
             Response::error('Venue name must be unique.', 409);
         }
+    }
+    if (preg_match('#^/venues/(\d+)/availability$#', $path, $m) && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'venue.view');
+        $from = (string)($_GET['from'] ?? date('Y-m-d'));
+        $to = (string)($_GET['to'] ?? date('Y-m-d', strtotime($from . ' +30 days')));
+        Response::json(BookingService::availability((int)$m[1], $from, $to, $user));
     }
     if (preg_match('#^/venues/(\d+)$#', $path, $m) && $method === 'GET') {
         Auth::requireUser();
@@ -567,10 +586,58 @@ function route(string $method, string $path, array $body): void
                 'min_duration_minutes' => Settings::get('min_duration_minutes'),
                 'max_duration_minutes' => Settings::get('max_duration_minutes'),
                 'booking_window_days' => Settings::get('booking_window_days'),
+                'booking_lead_days' => (string)BookingService::leadDaysFor($user),
+                'booking_buffer_minutes' => (string)BookingService::bufferMinutes(),
+                'slot_step_minutes' => (string)BookingService::stepMinutes(),
                 'operating_hours_start' => Settings::get('operating_hours_start'),
                 'operating_hours_end' => Settings::get('operating_hours_end'),
             ]);
         }
+        Response::json(Settings::all());
+    }
+    if ($path === '/settings' && $method === 'PUT') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'settings.manage');
+        $in = is_array($body['settings'] ?? null) ? $body['settings'] : $body;
+
+        $isTime = static fn($v) => is_string($v) && preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $v) === 1;
+        $intIn = static fn($v, int $lo, int $hi) => (is_string($v) || is_int($v)) && preg_match('/^\d{1,5}$/', (string)$v) === 1 && (int)$v >= $lo && (int)$v <= $hi;
+        $rules = [
+            'booking_lead_days'       => [fn($v) => $intIn($v, 0, 60),   'Lead days must be a whole number from 0 to 60.'],
+            'booking_buffer_minutes'  => [fn($v) => $intIn($v, 0, 240) && (int)$v % 5 === 0, 'Buffer must be 0-240 minutes in steps of 5.'],
+            'slot_step_minutes'       => [fn($v) => in_array((string)$v, ['30', '60'], true), 'Time step must be 30 or 60 minutes.'],
+            'min_duration_minutes'    => [fn($v) => $intIn($v, 15, 1440), 'Minimum duration must be 15-1440 minutes.'],
+            'max_duration_minutes'    => [fn($v) => $intIn($v, 15, 1440), 'Maximum duration must be 15-1440 minutes.'],
+            'booking_window_days'     => [fn($v) => $intIn($v, 1, 730),  'Booking window must be 1-730 days.'],
+            'operating_hours_start'   => [$isTime, 'Opening time must be HH:MM.'],
+            'operating_hours_end'     => [$isTime, 'Closing time must be HH:MM.'],
+            'equipment_buffer_minutes'  => [fn($v) => $intIn($v, 0, 240) && (int)$v % 5 === 0, 'Equipment turnaround must be 0-240 minutes in steps of 5.'],
+            'equipment_reserve_pending' => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
+            'overlap_include_pending' => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
+            'reminder_hours_before'   => [fn($v) => $intIn($v, 0, 720),  'Reminder hours must be 0-720.'],
+        ];
+        $clean = [];
+        foreach ($in as $k => $v) {
+            if (!isset($rules[$k])) {
+                continue; // ignore unknown keys
+            }
+            if (!$rules[$k][0]($v)) {
+                Response::error($rules[$k][1], 422, ['errors' => [$k => $rules[$k][1]]]);
+            }
+            $clean[$k] = (string)$v;
+        }
+        $cur = Settings::all();
+        $get = static fn(string $k) => $clean[$k] ?? $cur[$k]['value'];
+        if ((int)$get('min_duration_minutes') > (int)$get('max_duration_minutes')) {
+            Response::error('Minimum duration cannot exceed maximum duration.', 422);
+        }
+        if ($get('operating_hours_start') >= $get('operating_hours_end')) {
+            Response::error('Opening time must be before closing time.', 422);
+        }
+        foreach ($clean as $k => $v) {
+            Settings::set($k, $v);
+        }
+        ActivityLog::write($user['id'], $user['email'], 'settings.update', 'settings', null, $clean);
         Response::json(Settings::all());
     }
 

@@ -32,7 +32,7 @@
 <body class="bg-paper text-ink font-sans antialiased" data-page-title="New Booking Request">
   <div id="app">
     <div id="page-header"></div>
-    <form id="booking-form" class="max-w-2xl" novalidate>
+    <form id="booking-form" class="max-w-4xl" novalidate>
       <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <div class="sm:col-span-2">
           <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="venueId">Venue</label>
@@ -41,22 +41,15 @@
           </select>
           <p class="field-error mt-1 text-xs text-clay hidden" data-for="venueId"></p>
         </div>
-        <div>
-          <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="date">Date</label>
-          <input type="date" name="date" id="date" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
-          <p class="field-error mt-1 text-xs text-clay hidden" data-for="date"></p>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="startTime">Start</label>
-            <input type="time" name="startTime" id="startTime" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
-            <p class="field-error mt-1 text-xs text-clay hidden" data-for="startTime"></p>
-          </div>
-          <div>
-            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="endTime">End</label>
-            <input type="time" name="endTime" id="endTime" required class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
-            <p class="field-error mt-1 text-xs text-clay hidden" data-for="endTime"></p>
-          </div>
+        <div class="sm:col-span-2">
+          <span class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Date &amp; time</span>
+          <div id="booking-calendar"></div>
+          <input type="hidden" name="date" id="date" />
+          <input type="hidden" name="startTime" id="startTime" />
+          <input type="hidden" name="endTime" id="endTime" />
+          <p class="field-error mt-2 text-xs text-clay hidden" data-for="date"></p>
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="startTime"></p>
+          <p class="field-error mt-1 text-xs text-clay hidden" data-for="endTime"></p>
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="purpose">Purpose</label>
@@ -98,7 +91,7 @@
 
       <div id="conflict-alert" class="hidden mt-5 border border-clay/40 bg-clay/5 text-ink text-sm px-4 py-3 rounded flex items-start gap-2">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="text-clay shrink-0 mt-0.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
-        <span>This venue is already booked during the selected time.</span>
+        <span id="conflict-text">This venue is already booked during the selected time.</span>
       </div>
 
       <div class="flex items-center gap-3 mt-8 pt-6 border-t border-rule">
@@ -109,13 +102,12 @@
   </div>
   <script type="module">
     import '../js/app.js';
-    import { getVenues, getUsers, getBookings, createBooking, getRequirementOptions } from '../js/api.js';
-    import { escapeHtml } from '../js/utils.js';
+    import { getVenues, getUsers, createBooking, getRequirementOptions, getRequirementAvailability } from '../js/api.js';
+    import { escapeHtml, debounce } from '../js/utils.js';
     import { pageHeader } from '../js/ui.js';
-    import { validateBookingForm, hasVenueConflict } from '../js/validators.js';
+    import { validateBookingForm } from '../js/validators.js';
+    import { mountBookingCalendar } from '../components/booking-calendar.js';
     import { toast } from '../components/toast.js';
-
-    let existingBookings = [];
 
     window.__pageInit = async function () {
       document.getElementById('page-header').innerHTML = pageHeader({
@@ -147,43 +139,96 @@
         });
       } catch {}
 
-      try {
-        const bookings = await getBookings({ status: 'Approved,Rescheduled' });
-        existingBookings = Array.isArray(bookings) ? bookings : bookings?.items || [];
-      } catch {
-        existingBookings = [];
-      }
-
       const form = document.getElementById('booking-form');
       const conflictAlert = document.getElementById('conflict-alert');
+      const conflictText = document.getElementById('conflict-text');
 
-      function checkConflict() {
-        const proposed = {
-          venueId: form.venueId.value,
-          date: form.date.value,
-          startTime: form.startTime.value,
-          endTime: form.endTime.value,
-        };
-        const conflict = hasVenueConflict(proposed, existingBookings);
-        conflictAlert.classList.toggle('hidden', !conflict);
-        return conflict;
+      let onSelectionChange = () => {};
+      const calendar = mountBookingCalendar(document.getElementById('booking-calendar'), {
+        onChange: ({ date, startTime, endTime }) => {
+          form.date.value = date;
+          form.startTime.value = startTime;
+          form.endTime.value = endTime;
+          conflictAlert.classList.add('hidden');
+          onSelectionChange();
+        },
+      });
+      venueSel.addEventListener('change', () => calendar.setVenue(venueSel.value));
+
+      // ── Additional requirements with live stock for the chosen venue / date / time ──
+      const reqBox = document.getElementById('requirements-box');
+      let reqOptions = [];
+      let reqAvail = null; // Map optionId -> { total, available, scope }
+      let reqSeq = 0;
+
+      function renderReqs(announce = false) {
+        const prev = new Map([...reqBox.querySelectorAll('.req-check')].map((c) => [
+          c.value,
+          { checked: c.checked, qty: reqBox.querySelector(`.req-qty[data-id="${c.value}"]`)?.value },
+        ]));
+        const removed = [];
+        const hint = reqAvail
+          ? ''
+          : '<p class="text-xs text-muted sm:col-span-2">Pick a venue, date and time to see what equipment is available.</p>';
+        const items = reqOptions.map((o) => {
+          const a = reqAvail?.get(o.id);
+          const limited = !!a && a.total != null;
+          const left = limited ? a.available : null;
+          const out = limited && left <= 0;
+          const cap = limited ? Math.min(o.maxQuantity, left) : o.maxQuantity;
+          const p = prev.get(String(o.id));
+          if (announce && p?.checked && out) removed.push(o.name);
+          const checked = !!p?.checked && !out;
+          const qty = Math.max(1, Math.min(Number(p?.qty) || 1, cap || 1));
+          let note = '';
+          if (limited) note = out ? 'Unavailable at this time' : `${left} of ${a.total} available${a.scope === 'PerVenue' ? ' in this room' : ''}`;
+          else if (o.totalStock != null) note = `${o.totalStock} in stock`;
+          return `
+          <label class="flex items-center gap-2 rounded border border-rule px-3 py-2 text-sm ${out ? 'opacity-50' : ''}">
+            <input type="checkbox" class="req-check" value="${o.id}" ${checked ? 'checked' : ''} ${out ? 'disabled' : ''} />
+            <span class="flex-1">${escapeHtml(o.name)}${o.description ? `<span class="block text-xs text-muted">${escapeHtml(o.description)}</span>` : ''}${note ? `<span class="block text-xs ${out ? 'text-clay' : 'text-accent'}">${escapeHtml(note)}</span>` : ''}</span>
+            ${cap > 1 ? `<input type="number" min="1" max="${cap}" value="${qty}" data-id="${o.id}" class="req-qty w-16 rounded border border-rule px-2 py-1 text-sm" />` : ''}
+          </label>`;
+        });
+        reqBox.innerHTML = hint + (items.join('') || '<p class="text-sm text-muted">No options configured.</p>');
+        reqBox.querySelectorAll('.req-qty').forEach((i) => i.addEventListener('change', () => {
+          const max = Number(i.max);
+          i.value = Math.max(1, Math.min(Number(i.value) || 1, max));
+        }));
+        if (removed.length) {
+          toast(`${removed.join(', ')} ${removed.length > 1 ? 'are' : 'is'} not available for that time and was unselected.`, 'error');
+        }
       }
 
-      ['venueId', 'date', 'startTime', 'endTime'].forEach((id) => {
-        form[id]?.addEventListener('change', checkConflict);
-      });
+      async function loadAvail() {
+        const q = { venueId: form.venueId.value, date: form.date.value, startTime: form.startTime.value, endTime: form.endTime.value };
+        const seq = ++reqSeq;
+        if (!q.venueId || !q.date || !q.startTime || !q.endTime) {
+          reqAvail = null;
+          renderReqs();
+          return;
+        }
+        try {
+          const list = await getRequirementAvailability(q);
+          if (seq !== reqSeq) return; // a newer request superseded this one
+          reqAvail = new Map(list.map((a) => [a.optionId, a]));
+        } catch {
+          if (seq !== reqSeq) return;
+          reqAvail = null;
+        }
+        renderReqs(true);
+      }
+      const scheduleAvail = debounce(loadAvail, 250);
+      onSelectionChange = () => {
+        if (form.venueId.value && form.date.value && form.startTime.value && form.endTime.value) scheduleAvail();
+        else loadAvail();
+      };
 
       try {
-        const opts = await getRequirementOptions();
-        const box = document.getElementById('requirements-box');
-        box.innerHTML = opts.length ? opts.map((o) => `
-          <label class="flex items-center gap-2 rounded border border-rule px-3 py-2 text-sm">
-            <input type="checkbox" class="req-check" value="${o.id}" />
-            <span class="flex-1">${escapeHtml(o.name)}${o.description ? `<span class="block text-xs text-muted">${escapeHtml(o.description)}</span>` : ''}</span>
-            ${o.maxQuantity > 1 ? `<input type="number" min="1" max="${o.maxQuantity}" value="1" data-id="${o.id}" class="req-qty w-16 rounded border border-rule px-2 py-1 text-sm" />` : ''}
-          </label>`).join('') : '<p class="text-sm text-muted">No options configured.</p>';
+        reqOptions = await getRequirementOptions();
+        renderReqs();
       } catch {
-        document.getElementById('requirements-box').innerHTML = '<p class="text-sm text-muted">Options unavailable.</p>';
+        reqBox.innerHTML = '<p class="text-sm text-muted">Options unavailable.</p>';
       }
 
       form.addEventListener('submit', async (e) => {
@@ -220,7 +265,6 @@
           }
           return;
         }
-        if (checkConflict()) return;
 
         const btn = document.getElementById('submit-btn');
         btn.disabled = true;
@@ -229,8 +273,15 @@
           await createBooking(fields);
           toast('Request submitted.', 'success');
           window.location.href = '/pages/my-requests.html';
-        } catch {
-          toast('Backend not connected yet. Request not sent.', 'error');
+        } catch (err) {
+          if (err.status === 409 || err.status === 422) {
+            conflictText.textContent = err.message;
+            conflictAlert.classList.remove('hidden');
+            await calendar.refresh(); // someone may have just taken the slot
+            await loadAvail(); // ...or the last projector
+          } else {
+            toast(err.message || 'Could not submit the request.', 'error');
+          }
         } finally {
           btn.disabled = false;
           btn.textContent = 'Submit request';

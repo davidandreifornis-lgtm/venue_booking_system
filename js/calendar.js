@@ -6,8 +6,9 @@
 
 import { formatDate, formatTime, escapeHtml } from './utils.js';
 import { emptyState } from '../components/empty-state.js';
+import { bookingPhase } from '../components/status-badge.js';
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 7:00 – 20:00
+const HOURS = Array.from({ length: 9 }, (_, i) => i + 8); // 8:00 AM – 5:00 PM
 
 export function renderWeekGrid(container, { events = [], weekStart, onEventClick } = {}) {
   if (!container) return;
@@ -93,19 +94,24 @@ export function renderDayList(container, { events = [], date, onEventClick } = {
 
   const items = events
     .map((ev) => {
+      const phase = bookingPhase(ev);
       const color =
-        ev.status === 'Approved'
-          ? 'bg-accent/15 border-accent/40'
-          : ev.status === 'Rescheduled'
-            ? 'bg-clay/10 border-clay/30'
-            : 'border-dashed border-rule bg-transparent';
+        phase === 'live'
+          ? 'bg-[#0d6efd]/10 border-[#0d6efd]/40'
+          : phase === 'done'
+            ? 'bg-ink/5 border-rule'
+            : ev.status === 'Approved'
+              ? 'bg-accent/15 border-accent/40'
+              : ev.status === 'Rescheduled'
+                ? 'bg-clay/10 border-clay/30'
+                : 'border-dashed border-rule bg-transparent';
       return `
         <button type="button" data-id="${escapeHtml(ev.id)}" class="w-full text-left border ${color} rounded-sm p-3 mb-2 hover:shadow-card transition-shadow duration-150">
           <div class="flex items-baseline justify-between gap-2">
             <p class="font-medium text-sm text-ink">${escapeHtml(ev.venueName || ev.venue || 'Venue')}</p>
             <p class="text-xs text-muted shrink-0">${escapeHtml(formatTime(ev.startTime))} – ${escapeHtml(formatTime(ev.endTime))}</p>
           </div>
-          <p class="text-xs text-muted mt-1">${escapeHtml(ev.purpose || '')}</p>
+          <p class="text-xs text-muted mt-1">${phase === 'live' ? '<strong class="text-[#0d6efd]">In progress</strong> · ' : phase === 'done' ? 'Done · ' : ''}${escapeHtml(ev.purpose || '')}</p>
         </button>
       `;
     })
@@ -124,16 +130,29 @@ export function renderDayList(container, { events = [], date, onEventClick } = {
   }
 }
 
+const HOUR_PX = 56; // matches the h-14 hour rows
+
+function eventClasses(ev) {
+  const phase = bookingPhase(ev);
+  if (phase === 'live') return 'bg-[#0d6efd] text-white ring-2 ring-[#0d6efd]/30';
+  if (phase === 'done') return 'bg-ink/25 text-ink';
+  if (ev.status === 'Approved') return 'bg-accent text-paper';
+  if (ev.status === 'Rescheduled') return 'bg-clay text-paper';
+  return 'border border-dashed border-rule bg-paper text-muted';
+}
+
 function eventBlock(ev, onClick) {
-  const color =
-    ev.status === 'Approved'
-      ? 'bg-accent text-paper'
-      : ev.status === 'Rescheduled'
-        ? 'bg-clay text-paper'
-        : 'border border-dashed border-rule bg-paper text-muted';
+  const [sh, sm] = String(ev.startTime).split(':').map(Number);
+  const [eh, em] = String(ev.endTime).split(':').map(Number);
+  const dur = Math.max(15, eh * 60 + em - (sh * 60 + sm));
+  const top = (sm / 60) * HOUR_PX;
+  const height = Math.max(16, (dur / 60) * HOUR_PX - 2);
+  const live = bookingPhase(ev) === 'live';
+  const done = bookingPhase(ev) === 'done';
+  const label = live ? 'In progress' : done ? 'Done' : '';
   return `
-    <button type="button" class="absolute inset-x-0.5 top-0.5 bottom-0.5 ${color} rounded-sm px-1 text-[10px] leading-tight overflow-hidden text-left z-10" data-id="${escapeHtml(ev.id)}">
-      ${escapeHtml(ev.venueName || ev.purpose || 'Booking')}
+    <button type="button" class="absolute inset-x-0.5 ${eventClasses(ev)} rounded-sm px-1 text-[10px] leading-tight overflow-hidden text-left z-10" style="top:${top + 1}px;height:${height}px" data-id="${escapeHtml(ev.id)}">
+      ${label ? `<span class="font-medium">${label} · </span>` : ''}${escapeHtml(ev.purpose || ev.venueName || 'Booking')}
     </button>
   `;
 }

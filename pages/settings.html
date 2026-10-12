@@ -55,7 +55,7 @@
 </head>
 <body class="bg-paper text-ink font-sans antialiased" data-page-title="Settings">
   <div id="app">
-    <div class="max-w-lg">
+    <div class="max-w-2xl">
       <section class="mb-10">
         <h2 class="font-display text-xl font-medium tracking-[-0.02em] mb-1">Profile</h2>
         <p class="text-sm text-muted mb-5">Your account details are managed by the authentication service.</p>
@@ -79,6 +79,72 @@
         </dl>
       </section>
 
+      <section id="admin-rules" class="mb-10 hidden">
+        <h2 class="font-display text-xl font-medium tracking-[-0.02em] mb-1">Booking rules</h2>
+        <p class="text-sm text-muted mb-5">These rules drive the booking calendar and are enforced by the server. HR and Administrators are exempt from the advance-notice rule.</p>
+        <form id="rules-form" class="grid grid-cols-1 gap-5 sm:grid-cols-2" novalidate>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="booking_lead_days">Advance notice (days)</label>
+            <input type="number" min="0" max="60" id="booking_lead_days" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+            <p class="mt-1 text-xs text-muted">Earliest bookable date = today + this many days.</p>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="booking_buffer_minutes">Buffer between bookings</label>
+            <select id="booking_buffer_minutes" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10">
+              <option value="0">None</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
+              <option value="45">45 minutes</option><option value="60">1 hour</option>
+            </select>
+            <p class="mt-1 text-xs text-muted">Kept free before and after every booking.</p>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="slot_step_minutes">Time selection</label>
+            <select id="slot_step_minutes" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10">
+              <option value="30">Hours and half hours</option><option value="60">Whole hours only</option>
+            </select>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="booking_window_days">Book up to (days ahead)</label>
+            <input type="number" min="1" max="730" id="booking_window_days" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="min_duration_minutes">Minimum duration (minutes)</label>
+            <input type="number" min="15" step="15" id="min_duration_minutes" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="max_duration_minutes">Maximum duration (minutes)</label>
+            <input type="number" min="15" step="15" id="max_duration_minutes" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="operating_hours_start">Opens</label>
+            <input type="time" id="operating_hours_start" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="operating_hours_end">Closes</label>
+            <input type="time" id="operating_hours_end" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10" />
+          </div>
+          <div>
+            <label class="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted" for="equipment_buffer_minutes">Equipment turnaround</label>
+            <select id="equipment_buffer_minutes" class="w-full rounded border border-rule bg-paper px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 focus:ring-1 focus:ring-ink/10">
+              <option value="0">None</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
+              <option value="45">45 minutes</option><option value="60">1 hour</option>
+            </select>
+            <p class="mt-1 text-xs text-muted">Time to move shared equipment between bookings.</p>
+          </div>
+          <label class="flex items-center gap-2 text-sm self-center">
+            <input type="checkbox" id="equipment_reserve_pending" />
+            Pending requests also reserve equipment
+          </label>
+          <label class="sm:col-span-2 flex items-center gap-2 text-sm">
+            <input type="checkbox" id="overlap_include_pending" />
+            Pending requests also block the calendar
+          </label>
+          <p id="rules-error" class="sm:col-span-2 text-xs text-clay hidden"></p>
+          <div class="sm:col-span-2">
+            <button type="submit" id="rules-save" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 disabled:opacity-50">Save rules</button>
+          </div>
+        </form>
+      </section>
+
       <section>
         <h2 class="font-display text-xl font-medium tracking-[-0.02em] mb-1">Session</h2>
         <p class="text-sm text-muted mb-5">Sign out of this device.</p>
@@ -92,6 +158,8 @@
   <script type="module">
     import '../js/app.js';
     import { session, logout } from '../js/auth.js';
+    import { getSettings, updateSettings } from '../js/api.js';
+    import { toast } from '../components/toast.js';
 
     window.__pageInit = async function () {
       const s = session();
@@ -100,6 +168,40 @@
       document.getElementById('set-role').textContent = s?.role || '—';
       document.getElementById('set-dept').textContent = s?.department || s?.departmentName || '—';
       document.getElementById('btn-logout').addEventListener('click', () => logout());
+
+      if (s?.role === 'Administrator') {
+        const KEYS = ['booking_lead_days', 'booking_buffer_minutes', 'slot_step_minutes', 'booking_window_days',
+          'min_duration_minutes', 'max_duration_minutes', 'operating_hours_start', 'operating_hours_end', 'equipment_buffer_minutes'];
+        const box = document.getElementById('admin-rules');
+        const err = document.getElementById('rules-error');
+        box.classList.remove('hidden');
+
+        const fill = (data) => {
+          KEYS.forEach((k) => { document.getElementById(k).value = data[k]?.value ?? ''; });
+          document.getElementById('overlap_include_pending').checked = data.overlap_include_pending?.value === '1';
+          document.getElementById('equipment_reserve_pending').checked = data.equipment_reserve_pending?.value === '1';
+        };
+        try { fill(await getSettings()); } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+
+        document.getElementById('rules-form').addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          err.classList.add('hidden');
+          const payload = Object.fromEntries(KEYS.map((k) => [k, document.getElementById(k).value]));
+          payload.overlap_include_pending = document.getElementById('overlap_include_pending').checked ? '1' : '0';
+          payload.equipment_reserve_pending = document.getElementById('equipment_reserve_pending').checked ? '1' : '0';
+          const btn = document.getElementById('rules-save');
+          btn.disabled = true;
+          try {
+            fill(await updateSettings(payload));
+            toast('Booking rules saved.', 'success');
+          } catch (e) {
+            err.textContent = e.message || 'Could not save.';
+            err.classList.remove('hidden');
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      }
     };
   </script>
 </body>

@@ -67,7 +67,7 @@
             { key: 'requester', label: 'Requester', render: (r) => r.requesterName || r.requester || '—' },
             { key: 'venue', label: 'Venue', render: (r) => r.venueName || r.venue || '—' },
             { key: 'date', label: 'Date', render: (r) => formatDate(r.date) },
-            { key: 'status', label: 'Status', render: (r) => statusBadge(r.status), sortable: false },
+            { key: 'status', label: 'Status', render: (r) => statusBadge(r), sortable: false },
           ],
           rows: list,
           empty: { title: 'No booking requests found.' },

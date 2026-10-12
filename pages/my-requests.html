@@ -40,7 +40,7 @@
             { key: 'venue', label: 'Venue', render: (r) => r.venueName || r.venue || '—' },
             { key: 'date', label: 'Date', render: (r) => formatDate(r.date) },
             { key: 'time', label: 'Time', render: (r) => `${formatTime(r.startTime)} – ${formatTime(r.endTime)}`, sortable: false },
-            { key: 'status', label: 'Status', render: (r) => statusBadge(r.status), sortable: false },
+            { key: 'status', label: 'Status', render: (r) => statusBadge(r), sortable: false },
           ],
           rows: list,
           empty: {

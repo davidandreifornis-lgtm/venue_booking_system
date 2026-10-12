@@ -54,7 +54,7 @@
               <td>${b.requesterName || b.requester || '—'}</td>
               <td>${b.venueName || b.venue || '—'}</td>
               <td>${formatDate(b.date)}</td>
-              <td>${statusBadge(b.status)}</td>
+              <td>${statusBadge(b)}</td>
               <td><a class="btn btn-primary btn-sm" href="booking-details.html?id=${encodeURIComponent(b.id)}">Review</a></td>
             </tr>`).join('')}
           </tbody></table></div>`;

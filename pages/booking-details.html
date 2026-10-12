@@ -110,7 +110,7 @@
                 <p class="text-xs text-muted tracking-wide">${escapeHtml(booking.ref || booking.id || '')}</p>
                 <h2 class="font-display text-2xl font-medium tracking-[-0.02em] mt-1">${escapeHtml(booking.purpose || 'Booking Request')}</h2>
               </div>
-              <div>${statusBadge(booking.status)}</div>
+              <div>${statusBadge(booking)}</div>
             </div>
 
             <dl class="mb-10">

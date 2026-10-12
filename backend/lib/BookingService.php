@@ -56,6 +56,7 @@ class BookingService
             'attendees' => (int)$r['Attendees'],
             'additionalRequirements' => $r['AdditionalRequirements'],
             'status' => $r['Status'],
+            'phase' => self::phaseOf($r),
             'managerNotes' => $r['ManagerNotes'],
             'hrNotes' => $r['HrNotes'],
             'cancelReason' => $r['CancelReason'],
@@ -68,6 +69,25 @@ class BookingService
             'proposedEndTime' => !empty($r['ProposedEndTime']) ? self::fmtTime($r['ProposedEndTime']) : null,
             'proposalNotes' => $r['ProposalNotes'] ?? null,
         ];
+    }
+
+    /** 'live' while an approved meeting is happening, 'done' once it has ended, else null. */
+    private static function phaseOf(array $r): ?string
+    {
+        if ($r['Status'] === self::STATUS_COMPLETED) {
+            return 'done';
+        }
+        if ($r['Status'] !== self::STATUS_APPROVED && $r['Status'] !== self::STATUS_RESCHEDULED) {
+            return null;
+        }
+        $d = self::fmtDate($r['BookingDate']);
+        $now = time();
+        $start = strtotime($d . ' ' . self::fmtTime($r['StartTime']));
+        $end = strtotime($d . ' ' . self::fmtTime($r['EndTime']));
+        if ($now >= $end) {
+            return 'done';
+        }
+        return $now >= $start ? 'live' : null;
     }
 
     private static function fmtDate($v): string
@@ -107,6 +127,7 @@ class BookingService
 
     public static function getById(int $id): ?array
     {
+        self::completePast();
         $pdo = Database::pdo();
         $stmt = $pdo->prepare(self::baseSelect() . ' WHERE b.BookingId = ?');
         $stmt->execute([$id]);
@@ -126,7 +147,7 @@ class BookingService
         $d = date('Y-m-d');
         $t = date('H:i:s');
         $st = [self::STATUS_APPROVED, self::STATUS_RESCHEDULED];
-        $cond = "Status IN (?, ?) AND (BookingDate < ? OR (BookingDate = ? AND EndTime < ?))";
+        $cond = "Status IN (?, ?) AND (BookingDate < ? OR (BookingDate = ? AND EndTime <= ?))";
         $bind = array_merge($st, [$d, $d, $t]);
         $pdo->prepare("INSERT INTO dbo.BookingStatusHistory (BookingId, FromStatus, ToStatus, ChangedByUserId, Reason)
                        SELECT BookingId, Status, 'Completed', NULL, 'Auto-completed after event' FROM dbo.Bookings WHERE $cond")->execute($bind);
@@ -158,6 +179,30 @@ class BookingService
         }
         // HR / Admin: all unless scope=mine
 
+        if (!empty($params['venueId'])) {
+            $where[] = 'b.VenueId = ?';
+            $bind[] = (int)$params['venueId'];
+        }
+        if (!empty($params['department'])) {
+            $where[] = 'd.Name = ?';
+            $bind[] = (string)$params['department'];
+        }
+        if (!empty($params['from'])) {
+            $where[] = 'b.BookingDate >= ?';
+            $bind[] = substr((string)$params['from'], 0, 10);
+        }
+        if (!empty($params['to'])) {
+            $where[] = 'b.BookingDate <= ?';
+            $bind[] = substr((string)$params['to'], 0, 10);
+        }
+
+        if (!$status && ($params['view'] ?? '') === 'calendar') {
+            // Calendar default: everything still relevant (no declined / cancelled / revision).
+            $status = implode(',', [
+                self::STATUS_APPROVED, self::STATUS_RESCHEDULED, self::STATUS_PROPOSED, self::STATUS_COMPLETED,
+                self::STATUS_PENDING_MANAGER, self::STATUS_MANAGER_VALIDATED, self::STATUS_PENDING_HR,
+            ]);
+        }
         if ($status) {
             $parts = array_map('trim', explode(',', $status));
             $ph = implode(',', array_fill(0, count($parts), '?'));
@@ -173,7 +218,7 @@ class BookingService
         return array_map([self::class, 'mapRow'], $stmt->fetchAll());
     }
 
-    public static function validatePayload(array $payload, ?int $excludeBookingId = null): array
+    public static function validatePayload(array $payload, ?int $excludeBookingId = null, ?array $user = null): array
     {
         $errors = [];
         foreach (['venueId' => 'Venue', 'date' => 'Date', 'startTime' => 'Start time', 'endTime' => 'End time', 'purpose' => 'Purpose'] as $k => $label) {
@@ -197,6 +242,14 @@ class BookingService
             $errors['date'] = 'Cannot book a past date.';
         }
 
+        $lead = self::leadDaysFor($user);
+        if ($lead > 0 && !isset($errors['date'])) {
+            $earliest = date('Y-m-d', strtotime("today +{$lead} days"));
+            if ($date < $earliest) {
+                $errors['date'] = "Bookings must be made at least {$lead} day(s) in advance. Earliest available date: {$earliest}.";
+            }
+        }
+
         $window = (int)(Settings::get('booking_window_days', '90') ?: 90);
         $maxDate = date('Y-m-d', time() + $window * 86400);
         if ($date > $maxDate) {
@@ -204,7 +257,7 @@ class BookingService
         }
 
         $ohStart = Settings::get('operating_hours_start', '08:00');
-        $ohEnd = Settings::get('operating_hours_end', '18:00');
+        $ohEnd = Settings::get('operating_hours_end', '17:00');
         if ($start !== null && $end !== null) {
             $os = self::toMinutes($ohStart);
             $oe = self::toMinutes($ohEnd);
@@ -222,6 +275,12 @@ class BookingService
             }
             if ($dur > $maxD) {
                 $errors['endTime'] = "Maximum duration is {$maxD} minutes.";
+            }
+            $step = self::stepMinutes();
+            if ($start % $step !== 0 || $end % $step !== 0) {
+                $errors['startTime'] = $step === 60
+                    ? 'Times must start and end on the hour.'
+                    : 'Times must start and end on the hour or half hour.';
             }
         }
 
@@ -246,7 +305,7 @@ class BookingService
                 $excludeBookingId
             );
             if ($conflict) {
-                $errors['conflict'] = 'This venue is already booked for the selected time (ref: ' . $conflict['ReferenceCode'] . ').';
+                $errors['conflict'] = 'This venue is already booked, or too close to another booking, for the selected time (ref: ' . $conflict['ReferenceCode'] . ').';
             }
         }
 
@@ -267,7 +326,11 @@ class BookingService
                   AND Status IN ($ph)
                   AND StartTime < ?
                   AND EndTime > ?";
-        $bind = array_merge([$venueId, $date], $statuses, [self::normalizeTime($end), self::normalizeTime($start)]);
+        // Keep a buffer free before and after every booking.
+        $buffer = self::bufferMinutes();
+        $endPlusBuffer = self::shiftTime($end, $buffer);
+        $startMinusBuffer = self::shiftTime($start, -$buffer);
+        $bind = array_merge([$venueId, $date], $statuses, [$endPlusBuffer, $startMinusBuffer]);
         if ($excludeId) {
             $sql .= ' AND BookingId <> ?';
             $bind[] = $excludeId;
@@ -280,7 +343,7 @@ class BookingService
 
     public static function create(array $user, array $payload): array
     {
-        $errors = self::validatePayload($payload);
+        $errors = self::validatePayload($payload, null, $user);
         if ($errors) {
             Response::error(reset($errors), 422, ['errors' => $errors]);
         }
@@ -299,10 +362,10 @@ class BookingService
             );
             if ($conflict) {
                 $pdo->rollBack();
-                Response::error('This venue is already booked for the selected time (ref: ' . $conflict['ReferenceCode'] . ').', 409);
+                Response::error('This venue is already booked, or too close to another booking, for the selected time (ref: ' . $conflict['ReferenceCode'] . ').', 409);
             }
 
-            $stockErr = RequirementOptions::checkStock($reqItems, substr($payload['date'], 0, 10), self::normalizeTime($payload['startTime']), self::normalizeTime($payload['endTime']), null);
+            $stockErr = RequirementOptions::checkStock($reqItems, (int)$payload['venueId'], substr($payload['date'], 0, 10), self::normalizeTime($payload['startTime']), self::normalizeTime($payload['endTime']), null);
             if ($stockErr) {
                 $pdo->rollBack();
                 Response::error($stockErr, 409);
@@ -447,7 +510,7 @@ class BookingService
         }
 
         $reqs = array_map(static fn($r) => [$r['optionId'], $r['name'], $r['quantity']], RequirementOptions::forBooking($id));
-        $stockErr = RequirementOptions::checkStock($reqs, $b['date'], self::normalizeTime($b['startTime']), self::normalizeTime($b['endTime']), $id);
+        $stockErr = RequirementOptions::checkStock($reqs, (int)$b['venueId'], $b['date'], self::normalizeTime($b['startTime']), self::normalizeTime($b['endTime']), $id);
         if ($stockErr) {
             Response::error('Cannot approve: ' . $stockErr, 409);
         }
@@ -663,7 +726,7 @@ class BookingService
             Response::error('Only bookings with requested revisions can be edited.', 409);
         }
         $m = array_merge($b, array_intersect_key($payload, array_flip(['venueId', 'date', 'startTime', 'endTime', 'purpose', 'eventType', 'attendees', 'additionalRequirements'])));
-        $errors = self::validatePayload($m, $id);
+        $errors = self::validatePayload($m, $id, $user);
         if ($errors) {
             Response::error(reset($errors), 422, ['errors' => $errors]);
         }
@@ -753,6 +816,85 @@ class BookingService
             return null;
         }
         return (int)$m[1] * 60 + (int)$m[2];
+    }
+
+    /** Employees and Managers must book N days ahead; HR/Admin create official bookings and are exempt. */
+    public static function leadDaysFor(?array $user): int
+    {
+        if (!$user || in_array($user['role'] ?? '', ['HR', 'Administrator'], true)) {
+            return 0;
+        }
+        return max(0, Settings::int('booking_lead_days', 2));
+    }
+
+    public static function bufferMinutes(): int
+    {
+        return max(0, Settings::int('booking_buffer_minutes', 30));
+    }
+
+    public static function stepMinutes(): int
+    {
+        $s = Settings::int('slot_step_minutes', 30);
+        return $s === 60 ? 60 : 30;
+    }
+
+    /** "HH:MM[:SS]" shifted by $minutes, clamped to the same day, returned as HH:MM:SS. */
+    private static function shiftTime(string $t, int $minutes): string
+    {
+        $m = self::toMinutes($t) ?? 0;
+        $m = max(0, min(24 * 60 - 1, $m + $minutes));
+        return sprintf('%02d:%02d:00', intdiv($m, 60), $m % 60);
+    }
+
+    /**
+     * Calendar data for one venue: booking rules + the blocked time ranges.
+     * Deliberately exposes no purpose / requester names (any employee can call it).
+     */
+    public static function availability(int $venueId, string $from, string $to, array $user): array
+    {
+        self::completePast();
+        $re = '/^\d{4}-\d{2}-\d{2}$/';
+        if (!preg_match($re, $from) || !preg_match($re, $to) || $to < $from) {
+            Response::error('Invalid date range.', 422);
+        }
+        if ((strtotime($to) - strtotime($from)) > 62 * 86400) {
+            Response::error('Date range too large (max 62 days).', 422);
+        }
+
+        $lead = self::leadDaysFor($user);
+        $window = (int)(Settings::get('booking_window_days', '90') ?: 90);
+        $config = [
+            'minDate'       => date('Y-m-d', strtotime("today +{$lead} days")),
+            'maxDate'       => date('Y-m-d', strtotime("today +{$window} days")),
+            'today'         => date('Y-m-d'),
+            'leadDays'      => $lead,
+            'bufferMinutes' => self::bufferMinutes(),
+            'stepMinutes'   => self::stepMinutes(),
+            'minDuration'   => (int)(Settings::get('min_duration_minutes', '30') ?: 30),
+            'maxDuration'   => (int)(Settings::get('max_duration_minutes', '480') ?: 480),
+            'opens'         => Settings::get('operating_hours_start', '08:00'),
+            'closes'        => Settings::get('operating_hours_end', '17:00'),
+        ];
+
+        $statuses = self::blockingStatuses(Settings::get('overlap_include_pending', '0') === '1');
+        $ph = implode(',', array_fill(0, count($statuses), '?'));
+        $stmt = Database::pdo()->prepare(
+            "SELECT BookingDate, StartTime, EndTime, RequesterUserId
+             FROM dbo.Bookings
+             WHERE VenueId = ? AND BookingDate BETWEEN ? AND ? AND Status IN ($ph)
+             ORDER BY BookingDate, StartTime"
+        );
+        $stmt->execute(array_merge([$venueId, $from, $to], $statuses));
+        $blocks = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $blocks[] = [
+                'date'  => self::fmtDate($r['BookingDate']),
+                'start' => self::fmtTime($r['StartTime']),
+                'end'   => self::fmtTime($r['EndTime']),
+                'mine'  => (int)$r['RequesterUserId'] === (int)$user['id'],
+            ];
+        }
+        return ['config' => $config, 'blocks' => $blocks];
     }
 
     private static function normalizeTime(string $t): string

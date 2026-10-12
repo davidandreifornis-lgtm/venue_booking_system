@@ -79,7 +79,7 @@
             { key: 'name', label: 'Option' },
             { key: 'description', label: 'Description', render: (r) => escapeHtml(r.description || '—') },
             { key: 'maxQuantity', label: 'Max qty' },
-            { key: 'totalStock', label: 'Stock', render: (r) => (r.totalStock ?? 'Unlimited') },
+            { key: 'totalStock', label: 'Stock', render: (r) => (r.totalStock == null ? 'Unlimited' : `${r.totalStock}${r.stockScope === 'PerVenue' ? ' per venue' : ' shared'}`) },
             { key: 'isActive', label: 'Status', render: (r) => (r.isActive ? 'Active' : 'Inactive') },
             { key: 'actions', label: 'Actions', sortable: false,
               render: (r) => `<button type="button" class="text-accent hover:underline text-sm btn-edit" data-id="${r.id}">Edit</button>` },
@@ -107,6 +107,10 @@
           <div><label ${lbl}>Description</label><input name="description" value="${escapeHtml(o?.description || '')}" ${f} /></div>
           <div><label ${lbl}>Max quantity</label><input name="maxQuantity" type="number" min="1" value="${o?.maxQuantity || 1}" ${f} /></div>
           <div><label ${lbl}>Total stock (blank = unlimited)</label><input name="totalStock" type="number" min="0" value="${o?.totalStock ?? ''}" ${f} /></div>
+          <div><label ${lbl}>Stock is counted</label><select name="stockScope" ${f}>
+            <option value="Shared" ${o?.stockScope === 'PerVenue' ? '' : 'selected'}>Shared across all venues (portable: projector, microphones)</option>
+            <option value="PerVenue" ${o?.stockScope === 'PerVenue' ? 'selected' : ''}>Separately in each venue (built-in: chairs, TV screen)</option>
+          </select></div>
           <div><label ${lbl}>Sort order</label><input name="sortOrder" type="number" value="${o?.sortOrder || 0}" ${f} /></div>
           <div><label ${lbl}>Status</label><select name="isActive" ${f}><option value="1" ${o?.isActive === false ? '' : 'selected'}>Active</option><option value="0" ${o?.isActive === false ? 'selected' : ''}>Inactive</option></select></div>
         </div>`,

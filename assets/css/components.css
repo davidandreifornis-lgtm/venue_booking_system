@@ -147,6 +147,10 @@
 .badge-declined { background: #f8d7da; color: #842029; }
 .badge-rescheduled { background: #fff3cd; color: #664d03; }
 .badge-cancelled { background: #e9ecef; color: #6c757d; }
+.badge-done { background: #e2e8e6; color: #3d4f4c; }
+.badge-live { background: #cfe2ff; color: #084298; display: inline-flex; align-items: center; gap: 6px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: #0d6efd; animation: live-pulse 1.4s ease-in-out infinite; }
+@keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
 .badge-primary { background: #0d6efd; color: #fff; }
 .badge-dark { background: #212529; color: #fff; }
 

@@ -62,7 +62,7 @@
             { key: 'department', label: 'Department', render: (row) => row.department || '—' },
             { key: 'venue', label: 'Venue', render: (row) => row.venueName || row.venue || '—' },
             { key: 'date', label: 'Date', render: (row) => formatDate(row.date) },
-            { key: 'status', label: 'Status', render: (row) => statusBadge(row.status), sortable: false },
+            { key: 'status', label: 'Status', render: (row) => statusBadge(row), sortable: false },
           ],
           rows: list,
           empty: { title: 'No pending requests.' },

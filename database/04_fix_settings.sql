@@ -14,7 +14,7 @@ USING (VALUES
   (N'max_duration_minutes',    N'480',   N'Maximum booking duration (minutes)'),
   (N'booking_window_days',     N'90',    N'Max days ahead for a booking'),
   (N'operating_hours_start',   N'08:00', N'Earliest start time'),
-  (N'operating_hours_end',     N'18:00', N'Latest end time'),
+  (N'operating_hours_end',     N'17:00', N'Latest end time'),
   (N'overlap_include_pending', N'0',     N'1 = pending also blocks venue'),
   (N'reminder_hours_before',   N'24',    N'Reminder hours before event')
 ) AS s (SettingKey, SettingValue, Description)

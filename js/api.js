@@ -131,6 +131,10 @@ export function updateVenue(id, payload) {
   return request('PUT', `/venues/${id}`, payload);
 }
 
+export function getVenueAvailability(id, from, to) {
+  return request('GET', `/venues/${id}/availability?from=${from}&to=${to}`);
+}
+
 export function deactivateVenue(id) {
   return request('POST', `/venues/${id}/deactivate`);
 }
@@ -160,6 +164,10 @@ export function deactivateUser(id) {
 // ── Requirement options ─────────────────────────────────
 export function getRequirementOptions(all = false) {
   return request('GET', `/requirement-options${all ? '?all=1' : ''}`);
+}
+export function getRequirementAvailability({ venueId, date, startTime, endTime }) {
+  const q = new URLSearchParams({ venueId, date, startTime, endTime }).toString();
+  return request('GET', `/requirement-options/availability?${q}`);
 }
 export function createRequirementOption(payload) {
   return request('POST', '/requirement-options', payload);
@@ -204,4 +212,13 @@ export function markNotificationRead(id) {
 export function getActivityLogs(params = {}) {
   const q = new URLSearchParams(params).toString();
   return request('GET', `/activity-logs${q ? `?${q}` : ''}`);
+}
+
+// ── Settings ────────────────────────────────────────────
+export function getSettings() {
+  return request('GET', '/settings');
+}
+
+export function updateSettings(settings) {
+  return request('PUT', '/settings', { settings });
 }

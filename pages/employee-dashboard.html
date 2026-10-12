@@ -80,7 +80,7 @@
             { key: 'ref', label: 'Reference', render: (r) => r.ref || r.id || '—' },
             { key: 'venue', label: 'Venue', render: (r) => r.venueName || r.venue || '—' },
             { key: 'date', label: 'Date', render: (r) => formatDate(r.date) },
-            { key: 'status', label: 'Status', render: (r) => statusBadge(r.status), sortable: false },
+            { key: 'status', label: 'Status', render: (r) => statusBadge(r), sortable: false },
           ],
           rows: list.slice(0, 10),
           empty: {
