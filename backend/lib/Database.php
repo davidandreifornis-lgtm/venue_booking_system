@@ -25,6 +25,22 @@ class Database
             }
         }
 
+        // Environment overrides (keep real credentials out of the repository).
+        $env = [
+            'driver'   => 'VBS_DB_DRIVER',
+            'server'   => 'VBS_DB_SERVER',
+            'database' => 'VBS_DB_NAME',
+            'username' => 'VBS_DB_USER',
+            'password' => 'VBS_DB_PASSWORD',
+            'port'     => 'VBS_DB_PORT',
+        ];
+        foreach ($env as $key => $var) {
+            $val = getenv($var);
+            if ($val !== false && $val !== '') {
+                $config[$key] = $val;
+            }
+        }
+
         return $config;
     }
 
