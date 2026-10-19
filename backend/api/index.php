@@ -178,6 +178,16 @@ function route(string $method, string $path, array $body): void
         Permissions::require($user, 'booking.decide');
         Response::json(BookingService::reschedule($user, (int)$m[1], $body));
     }
+    if (preg_match('#^/bookings/(\d+)/emergency-override$#', $path, $m) && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.override');
+        Response::json(BookingService::emergencyOverride($user, (int)$m[1], $body));
+    }
+    if (preg_match('#^/bookings/(\d+)/competing$#', $path, $m) && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.decide');
+        Response::json(BookingService::competingFor((int)$m[1]));
+    }
     if (preg_match('#^/bookings/(\d+)/request-revision$#', $path, $m) && $method === 'POST') {
         $user = Auth::requireUser();
         Permissions::require($user, 'booking.validate');
@@ -614,6 +624,7 @@ function route(string $method, string $path, array $body): void
             'equipment_buffer_minutes'  => [fn($v) => $intIn($v, 0, 240) && (int)$v % 5 === 0, 'Equipment turnaround must be 0-240 minutes in steps of 5.'],
             'equipment_reserve_pending' => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
             'overlap_include_pending' => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
+            'conflict_auto_action'    => [fn($v) => in_array((string)$v, ['reschedule', 'decline'], true), 'Competing-request action must be reschedule or decline.'],
             'reminder_hours_before'   => [fn($v) => $intIn($v, 0, 720),  'Reminder hours must be 0-720.'],
         ];
         $clean = [];

@@ -41,7 +41,7 @@
     import { pageHeader } from '../js/ui.js';
     import { dataTable } from '../components/data-table.js';
     import { statusBadge } from '../components/status-badge.js';
-    import { formatDate } from '../js/utils.js';
+    import { formatDate, formatDateTime, escapeHtml } from '../js/utils.js';
     import { toast } from '../components/toast.js';
 
     window.__pageInit = async function () {
@@ -54,16 +54,37 @@
       try {
         const data = await getBookings(status ? { status } : {});
         const list = Array.isArray(data) ? data : data?.items || [];
+        const isHr = r === 'HR' || r === 'Administrator';
+        // HR queue: the request that reached HR first (manager validation time) comes first.
+        if (isHr) {
+          list.sort((a, b) => (a.hrQueuedAt || '9999').localeCompare(b.hrQueuedAt || '9999') || a.id - b.id);
+        }
+        const columns = [
+          { key: 'ref', label: 'Reference', render: (row) => escapeHtml(row.ref || row.id || '—') },
+          { key: 'requester', label: 'Requester', render: (row) => escapeHtml(row.requesterName || row.requester || '—') },
+          { key: 'department', label: 'Department', render: (row) => escapeHtml(row.department || '—') },
+          { key: 'venue', label: 'Venue', render: (row) => escapeHtml(row.venueName || row.venue || '—') },
+          { key: 'date', label: 'Date', render: (row) => formatDate(row.date) },
+          { key: 'status', label: 'Status', render: (row) => statusBadge(row), sortable: false },
+        ];
+        if (isHr) {
+          columns.splice(5, 0,
+            { key: 'hrQueuedAt', label: 'Reached HR', render: (row) => (row.hrQueuedAt ? formatDateTime(row.hrQueuedAt) : '—') },
+            {
+              key: 'competing', label: 'Same-time requests', sortable: false,
+              render: (row) => {
+                const c = row.competing || [];
+                if (!c.length) return '—';
+                const refs = c.map((x) => escapeHtml(x.ref)).join(', ');
+                return `<span class="text-clay">Competes with ${refs}</span>`
+                  + (row.firstInLine ? ' <strong class="text-xs">· reached HR first</strong>' : '');
+              },
+            },
+          );
+        }
         dataTable({
           container: el,
-          columns: [
-            { key: 'ref', label: 'Reference', render: (row) => row.ref || row.id || '—' },
-            { key: 'requester', label: 'Requester', render: (row) => row.requesterName || row.requester || '—' },
-            { key: 'department', label: 'Department', render: (row) => row.department || '—' },
-            { key: 'venue', label: 'Venue', render: (row) => row.venueName || row.venue || '—' },
-            { key: 'date', label: 'Date', render: (row) => formatDate(row.date) },
-            { key: 'status', label: 'Status', render: (row) => statusBadge(row), sortable: false },
-          ],
+          columns,
           rows: list,
           empty: { title: 'No pending requests.' },
           onRowClick: (row) => { window.location.href = `booking-details.html?id=${encodeURIComponent(row.id)}`; },

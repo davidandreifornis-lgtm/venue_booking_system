@@ -113,6 +113,16 @@ export function cancelBooking(id, payload) {
   return request('POST', `/bookings/${id}/cancel`, payload);
 }
 
+/** HR/Admin only: move or cancel an already-approved booking in an emergency. payload: { mode, reason, date?, startTime?, endTime? } */
+export function emergencyOverride(id, payload) {
+  return request('POST', `/bookings/${id}/emergency-override`, payload);
+}
+
+/** HR/Admin only: other requests for the same time that approving this one would handle automatically. */
+export function getCompeting(id) {
+  return request('GET', `/bookings/${id}/competing`);
+}
+
 // ── Venues ──────────────────────────────────────────────
 export function getVenues(params = {}) {
   const q = new URLSearchParams(params).toString();

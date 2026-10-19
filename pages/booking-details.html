@@ -62,7 +62,7 @@
 
   <script type="module">
     import '../js/app.js';
-    import { getBooking, validateBooking, approveBooking, declineBooking, rescheduleBooking, requestRevision, respondReschedule, resubmitBooking } from '../js/api.js';
+    import { getBooking, validateBooking, approveBooking, declineBooking, rescheduleBooking, requestRevision, respondReschedule, resubmitBooking, emergencyOverride, getCompeting } from '../js/api.js';
     import { role, session } from '../js/auth.js';
     import { parseQuery, formatDate, formatTime, formatDateTime, escapeHtml } from '../js/utils.js';
     import { statusBadge } from '../components/status-badge.js';
@@ -95,6 +95,13 @@
       const r = role();
       const canManagerAct = r === 'Manager' && booking.status === 'Pending Manager Validation';
       const canHrAct = r === 'HR' && ['Pending HR Decision', 'Manager Validated'].includes(booking.status);
+      const isOwner = session()?.id === booking.requesterId;
+      // The requester answers a reschedule proposal / edits a returned request from this same Actions panel.
+      const ownerCanAct = isOwner && ['Reschedule Proposed', 'Revision Requested'].includes(booking.status);
+      // HR/Admin can pull an already-confirmed booking in an emergency (never their own).
+      const canOverride = ['HR', 'Administrator'].includes(r) && !isOwner
+        && ['Approved', 'Rescheduled', 'Reschedule Proposed'].includes(booking.status) && booking.phase !== 'done';
+      const showActions = canHrAct || canManagerAct || ownerCanAct || canOverride;
 
       const dl = (label, value) => `
         <div class="py-3 border-b border-rule">
@@ -126,11 +133,12 @@
               ${dl('Other Notes', escapeHtml(booking.additionalRequirements || '—'))}
               ${dl('Manager Notes', escapeHtml(booking.managerNotes || '—'))}
               ${dl('HR Notes', escapeHtml(booking.hrNotes || '—'))}
+              ${booking.cancelReason ? dl('Cancellation reason', escapeHtml(booking.cancelReason)) : ''}
               ${dl('Created', formatDateTime(booking.createdAt || booking.createdDate))}
               ${dl('Last Updated', formatDateTime(booking.updatedAt || booking.lastUpdatedDate))}
             </dl>
 
-            ${canHrAct || canManagerAct ? `
+            ${showActions ? `
               <div class="border border-rule rounded-sm p-5 mb-8">
                 <p class="text-[11px] uppercase tracking-[0.08em] text-muted mb-4">Actions</p>
                 <div class="flex flex-wrap gap-2" id="action-bar"></div>
@@ -181,14 +189,13 @@
 
       const run = async (fn, msg) => {
         try {
-          await fn();
-          flash(msg, 'success'); // shown again after the reload so it isn't lost
+          const out = await fn();
+          flash(typeof msg === 'function' ? msg(out) : msg, 'success'); // shown again after the reload so it isn't lost
           location.reload();
         } catch (err) {
           toast(err.message || 'Action failed.', 'error');
         }
       };
-      const isOwner = session()?.id === booking.requesterId;
       const fld = 'class="w-full border border-rule rounded-sm px-3 py-2 text-sm"';
       const lb = 'class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1 mt-3"';
       const btnCancel = '<button type="button" data-cancel class="px-3 py-1.5 text-sm border border-rule rounded-sm">Cancel</button>';
@@ -248,10 +255,25 @@
           <button type="button" id="act-reschedule" class="px-4 py-2 text-sm border border-rule text-ink rounded-sm hover:bg-rule/30">Reschedule</button>
         `;
 
-        document.getElementById('act-approve')?.addEventListener('click', () => {
+        document.getElementById('act-approve')?.addEventListener('click', async () => {
+          // Preview which competing requests approval will handle automatically (HR keeps the final say).
+          let info = null;
+          try { info = await getCompeting(id); } catch { /* approval itself still works without the preview */ }
+          const competing = info?.competing || [];
+          const heldBy = info?.heldBy;
+          const verb = info?.action === 'decline' ? 'declined' : 'moved to the nearest free time (or declined if none is free)';
+          const reachedFirst = competing.some((c) => c.validatedFirst);
+          const warn = `
+            ${heldBy ? `<div class="mb-3 rounded-sm border border-clay/40 bg-clay/5 p-3 text-sm text-clay">This time is already held by <strong>${escapeHtml(heldBy.ref)}</strong>. Approval will be refused unless that booking is cancelled or moved first.</div>` : ''}
+            ${competing.length ? `<div class="mb-3 rounded-sm border border-rule bg-rule/20 p-3 text-sm">
+              <p class="mb-1">Approving this will automatically handle ${competing.length} competing request${competing.length > 1 ? 's' : ''} for the same time. ${competing.length > 1 ? 'They' : 'It'} will be ${verb}:</p>
+              <ul class="list-disc pl-5">${competing.map((c) => `<li>${escapeHtml(c.ref)} — ${escapeHtml(c.requesterName)}${c.validatedFirst ? ' <strong>(reached HR before this request)</strong>' : ''}</li>`).join('')}</ul>
+              ${reachedFirst ? '<p class="mt-2 text-xs text-muted">Normally the request that reached HR first is approved. You can still approve this one — HR has the final say.</p>' : ''}
+            </div>` : ''}`;
           openModal({
             title: 'Approve this booking?',
             bodyHtml: `
+              ${warn}
               <p class="text-sm text-ink mb-3">Confirm approval of this booking request.</p>
               <label class="block text-[11px] uppercase tracking-[0.08em] text-muted mb-1.5">Optional note</label>
               <textarea id="hr-note" rows="2" class="w-full border border-rule rounded-sm px-3 py-2 text-sm"></textarea>
@@ -265,7 +287,10 @@
           document.getElementById('confirm-approve')?.addEventListener('click', async () => {
             const notes = document.getElementById('hr-note')?.value?.trim() || '';
             closeModal();
-            run(() => approveBooking(id, { notes }), `Booking ${booking.ref} approved. The requester has been notified.`);
+            run(() => approveBooking(id, { notes }), (res) => {
+              const n = res?.autoResolved?.length || 0;
+              return `Booking ${booking.ref} approved. The requester has been notified.` + (n ? ` ${n} competing request${n > 1 ? 's were' : ' was'} handled automatically.` : '');
+            });
           });
         });
 
@@ -334,6 +359,68 @@
             }
             closeModal();
             run(() => rescheduleBooking(id, { date, startTime, endTime, reason, notes: reason }), `New schedule proposed for ${booking.ref}. The requester was asked to respond.`);
+          });
+        });
+      }
+
+      if (canOverride && actionBar) {
+        actionBar.innerHTML = `
+          <p class="w-full text-xs text-muted mb-1">Only for urgent use of the venue. The requester and department manager are notified at once and this is logged.</p>
+          <button type="button" id="act-override" class="px-4 py-2 text-sm border border-clay text-clay rounded-sm hover:bg-clay/5">Emergency override</button>`;
+        document.getElementById('act-override').addEventListener('click', () => {
+          openModal({
+            title: 'Emergency override',
+            wide: true,
+            bodyHtml: `
+              <label ${lb}>What should happen to ${escapeHtml(booking.ref)}?</label>
+              <select id="ov-mode" ${fld}>
+                <option value="reschedule">Move it to another time</option>
+                <option value="cancel">Cancel it</option>
+              </select>
+              <div id="ov-when">
+                <p class="text-xs text-muted mt-3">Leave date and times empty to move it to the nearest free slot automatically.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div><label ${lb}>New date</label><input type="date" id="ov-date" ${fld} /></div>
+                  <div><label ${lb}>Start</label><input type="time" id="ov-start" ${fld} /></div>
+                  <div><label ${lb}>End</label><input type="time" id="ov-end" ${fld} /></div>
+                </div>
+              </div>
+              <label ${lb}>Reason (required)</label>
+              <textarea id="ov-reason" rows="3" maxlength="500" ${fld}></textarea>
+              <p id="ov-err" class="text-xs text-clay mt-2 hidden"></p>
+            `,
+            footerHtml: `${btnCancel}<button type="button" id="ov-ok" class="px-3 py-1.5 text-sm bg-clay text-paper rounded-sm">Apply override</button>`,
+          });
+          document.querySelector('[data-cancel]')?.addEventListener('click', closeModal);
+          const modeEl = document.getElementById('ov-mode');
+          modeEl.addEventListener('change', () => {
+            document.getElementById('ov-when').classList.toggle('hidden', modeEl.value === 'cancel');
+          });
+          document.getElementById('ov-ok').addEventListener('click', async () => {
+            const err = document.getElementById('ov-err');
+            const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+            err.classList.add('hidden');
+            const mode = modeEl.value;
+            const reason = document.getElementById('ov-reason').value.trim();
+            const date = document.getElementById('ov-date').value;
+            const startTime = document.getElementById('ov-start').value;
+            const endTime = document.getElementById('ov-end').value;
+            if (!reason) return fail('A reason is required.');
+            const given = [date, startTime, endTime].filter(Boolean).length;
+            if (mode === 'reschedule' && given !== 0 && given !== 3) return fail('Fill in the date, start and end — or leave all three empty.');
+            const btn = document.getElementById('ov-ok');
+            btn.disabled = true;
+            try {
+              await emergencyOverride(id, mode === 'cancel' ? { mode, reason } : { mode, reason, ...(given === 3 ? { date, startTime, endTime } : {}) });
+              closeModal();
+              flash(mode === 'cancel'
+                ? `${booking.ref} was cancelled. The requester has been notified.`
+                : `${booking.ref} was moved. The requester has been notified.`, 'success');
+              location.reload();
+            } catch (e) {
+              btn.disabled = false;
+              fail(e.message || 'The override could not be applied.');
+            }
           });
         });
       }

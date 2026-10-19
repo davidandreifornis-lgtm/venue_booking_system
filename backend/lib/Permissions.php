@@ -20,11 +20,13 @@ class Permissions
         ],
         'HR' => [
             'booking.create', 'booking.view_all', 'booking.decide', // approve / decline / reschedule
+            'booking.override', // emergency: move or cancel an already-approved booking
             'venue.list', 'venue.view', 'venue.availability',
             'notification.own',
         ],
         'Administrator' => [
             'booking.create', 'booking.view_all', 'booking.decide', 'booking.validate', 'booking.cancel_any',
+            'booking.override',
             'venue.list', 'venue.view', 'venue.manage',
             'user.manage', 'department.manage',
             'notification.own', 'activity.view', 'settings.manage',

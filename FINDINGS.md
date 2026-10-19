@@ -34,3 +34,9 @@ prediction from reading the code, not a test result. Run the suite and treat its
 - `backend/lib/Response.php`: added a `Response::$throw` flag so tests can catch responses instead of the script exiting. Off by default; production behaviour is unchanged.
 - `backend/lib/Database.php`: reads optional `VBS_DB_*` environment variables over the file config. If they're unset, nothing changes.
 I did not touch the credentials or fix any of the problems above; say the word and I'll start with the Critical ones (#1, #3, #4, #9 and the security list).
+
+---
+## Update (see CHANGES.md)
+* Item 1 (double booking): `approve()` is now atomic, and competing pending requests are resolved automatically
+  when HR approves one. A database-level overlap guard is still not in place.
+* HR can now move or cancel an already-approved booking in an emergency (`booking.override`).

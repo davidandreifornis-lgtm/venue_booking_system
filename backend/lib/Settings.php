@@ -19,6 +19,7 @@ class Settings
         'operating_hours_start'   => ['08:00', 'Earliest start time'],
         'operating_hours_end'     => ['17:00', 'Latest end time'],
         'overlap_include_pending' => ['0',     '1 = pending requests also block the venue'],
+        'conflict_auto_action'    => ['reschedule', 'When HR approves a booking, competing pending requests for the same time are: reschedule (nearest free slot, decline if none) or decline'],
         'reminder_hours_before'   => ['24',    'Reminder hours before event'],
     ];
 

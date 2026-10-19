@@ -11,7 +11,7 @@ here has been run or even syntax-checked. First step on your machine: `php -l` o
    (PowerShell, run files in this order; **skip `03_seed_demo_data.sql`**):
 
    ```powershell
-   foreach ($f in '01_schema','02_seed','04_fix_settings','05_workflow','06_requirement_options','07_stock','08_booking_rules','09_equipment_rules') {
+   foreach ($f in '01_schema','02_seed','04_fix_settings','05_workflow','06_requirement_options','07_stock','08_booking_rules','09_equipment_rules','10_conflict_rules') {
      (Get-Content "database\$f.sql" -Raw) -replace 'USE VenueBooking;','USE VenueBooking_Test;' |
        sqlcmd -S VMAPPS2 -U <login> -P <password> -b
    }
