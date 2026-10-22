@@ -30,6 +30,11 @@ require_once __DIR__ . '/../lib/ActivityLog.php';
 require_once __DIR__ . '/../lib/Settings.php';
 require_once __DIR__ . '/../lib/BookingService.php';
 require_once __DIR__ . '/../lib/NotificationService.php';
+require_once __DIR__ . '/../lib/MailService.php';
+require_once __DIR__ . '/../lib/ReportService.php';
+require_once __DIR__ . '/../lib/VenueScheduleService.php';
+require_once __DIR__ . '/../lib/RecurrenceService.php';
+require_once __DIR__ . '/../lib/BookingWorkflow.php';
 
 Auth::startSession();
 
@@ -459,8 +464,13 @@ function route(string $method, string $path, array $body): void
             }
         }
         $pdo->prepare('UPDATE dbo.Users SET IsActive = 0, UpdatedAt = SYSUTCDATETIME() WHERE UserId = ?')->execute([$id]);
-        ActivityLog::write($user['id'], $user['email'], 'user.deactivate', 'user', (string)$id, null);
-        Response::json(getUser($id));
+        $reassign = BookingService::onApproverDeactivated($id);
+        ActivityLog::write($user['id'], $user['email'], 'user.deactivate', 'user', (string)$id, $reassign);
+        $out = getUser($id);
+        if (is_array($out)) {
+            $out['reassignedBookings'] = $reassign['reassigned'] ?? 0;
+        }
+        Response::json($out);
     }
 
     // Departments
@@ -646,10 +656,190 @@ function route(string $method, string $path, array $body): void
             Response::error('Opening time must be before closing time.', 422);
         }
         foreach ($clean as $k => $v) {
-            Settings::set($k, $v);
+            Settings::set($k, $v, $user);
         }
         ActivityLog::write($user['id'], $user['email'], 'settings.update', 'settings', null, $clean);
         Response::json(Settings::all());
+    }
+
+
+
+    // ---------- Recurring series expand ----------
+    if (preg_match('#^/bookings/(\d+)/expand-recurrence$#', $path, $m) && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.create');
+        $rule = $body['rule'] ?? '';
+        if ($rule === '') {
+            Response::error('rule is required (e.g. FREQ=WEEKLY;BYDAY=TU;COUNT=8).', 422);
+        }
+        $result = RecurrenceService::expandSeries((int)$m[1], $rule, $user);
+        Response::json($result);
+    }
+
+
+    // ---------- Process jobs & queue ----------
+    if ($path === '/bookings/complete-past' && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.decide');
+        Response::json(BookingService::completePastBookings());
+    }
+    if ($path === '/bookings/escalate-manager-sla' && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.decide');
+        Response::json(BookingService::escalateOverdueManagerValidations());
+    }
+    if (preg_match('#^/bookings/(\d+)/queue$#', $path, $m) && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.view_own');
+        Response::json(BookingService::queuePosition((int)$m[1]));
+    }
+    if (preg_match('#^/bookings/(\d+)/no-show$#', $path, $m) && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.decide');
+        Response::json(BookingService::markNoShow($user, (int)$m[1], $body));
+    }
+
+    // ---------- Reports ----------
+    if ($path === '/reports/utilization' && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'reports.view');
+        Response::json(ReportService::utilization($_GET));
+    }
+    if ($path === '/reports/peak-hours' && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'reports.view');
+        Response::json(ReportService::peakHours($_GET));
+    }
+    if ($path === '/reports/turnaround' && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'reports.view');
+        Response::json(ReportService::approvalTurnaround($_GET));
+    }
+    if ($path === '/reports/status-summary' && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'reports.view');
+        Response::json(['statuses' => ReportService::statusSummary($_GET)]);
+    }
+
+    // ---------- Venue schedule (hours + blackouts) ----------
+    if (preg_match('#^/venues/(\d+)/hours$#', $path, $m) && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'venue.view');
+        Response::json(['hours' => VenueScheduleService::getHours((int)$m[1])]);
+    }
+    if (preg_match('#^/venues/(\d+)/hours$#', $path, $m) && $method === 'PUT') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'venue.manage');
+        $days = $body['hours'] ?? $body['days'] ?? [];
+        if (!is_array($days)) {
+            Response::error('hours must be an array.', 422);
+        }
+        VenueScheduleService::setHours((int)$m[1], $days, $user);
+        Response::json(['hours' => VenueScheduleService::getHours((int)$m[1])]);
+    }
+    if (preg_match('#^/venues/(\d+)/blackouts$#', $path, $m) && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'venue.view');
+        Response::json(['blackouts' => VenueScheduleService::listBlackouts((int)$m[1], $_GET['from'] ?? null, $_GET['to'] ?? null)]);
+    }
+    if (preg_match('#^/venues/(\d+)/blackouts$#', $path, $m) && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'venue.manage');
+        $start = $body['startAt'] ?? null;
+        $end = $body['endAt'] ?? null;
+        if (!$start || !$end) {
+            Response::error('startAt and endAt are required.', 422);
+        }
+        $id = VenueScheduleService::addBlackout((int)$m[1], $start, $end, $body['reason'] ?? null, $user);
+        Response::json(['id' => $id], 201);
+    }
+    if (preg_match('#^/blackouts/(\d+)$#', $path, $m) && $method === 'DELETE') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'venue.manage');
+        VenueScheduleService::deleteBlackout((int)$m[1]);
+        Response::noContent();
+    }
+
+    // ---------- iCal export ----------
+    if ($path === '/calendar/ical' && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.view_own');
+        $from = $_GET['from'] ?? date('Y-m-d');
+        $to = $_GET['to'] ?? date('Y-m-d', strtotime('+60 days'));
+        $pdo = Database::pdo();
+        $sql = "SELECT b.BookingId, b.ReferenceCode, b.BookingDate, b.StartTime, b.EndTime, b.Purpose,
+                       v.Name AS VenueName, v.Location
+                FROM dbo.Bookings b
+                INNER JOIN dbo.Venues v ON v.VenueId = b.VenueId
+                WHERE b.Status IN (N'Approved', N'Rescheduled')
+                  AND b.BookingDate >= ? AND b.BookingDate <= ?";
+        $bind = [$from, $to];
+        if (!Permissions::can($user, 'booking.view_all')) {
+            $sql .= ' AND b.RequesterUserId = ?';
+            $bind[] = $user['id'];
+        }
+        $sql .= ' ORDER BY b.BookingDate, b.StartTime';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($bind);
+        $lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//VenueBooking//EN", "CALSCALE:GREGORIAN"];
+        foreach ($stmt->fetchAll() as $r) {
+            $dtStart = str_replace(['-', ':'], '', $r['BookingDate'] . 'T' . substr($r['StartTime'], 0, 8));
+            $dtEnd   = str_replace(['-', ':'], '', $r['BookingDate'] . 'T' . substr($r['EndTime'], 0, 8));
+            $uid = 'vb-' . $r['BookingId'] . '@venuebooking';
+            $summary = str_replace([",", ";", "\n"], ["\\,", "\\;", "\\n"], ($r['Purpose'] ?: 'Booking') . ' @ ' . $r['VenueName']);
+            $loc = str_replace([",", ";", "\n"], ["\\,", "\\;", "\\n"], $r['Location'] ?? $r['VenueName']);
+            $lines[] = "BEGIN:VEVENT";
+            $lines[] = "UID:{$uid}";
+            $lines[] = "DTSTART:{$dtStart}";
+            $lines[] = "DTEND:{$dtEnd}";
+            $lines[] = "SUMMARY:{$summary}";
+            $lines[] = "LOCATION:{$loc}";
+            $lines[] = "DESCRIPTION:Ref " . $r['ReferenceCode'];
+            $lines[] = "END:VEVENT";
+        }
+        $lines[] = "END:VCALENDAR";
+        header('Content-Type: text/calendar; charset=utf-8');
+        header('Content-Disposition: attachment; filename="venue-bookings.ics"');
+        echo implode("\r\n", $lines);
+        exit;
+    }
+
+    // ---------- Find free rooms ----------
+    if ($path === '/venues/find-free' && $method === 'GET') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'venue.list');
+        $date = $_GET['date'] ?? null;
+        $start = $_GET['start'] ?? null;
+        $end = $_GET['end'] ?? null;
+        $capacity = isset($_GET['capacity']) ? (int)$_GET['capacity'] : 1;
+        if (!$date || !$start || !$end) {
+            Response::error('date, start and end are required.', 422);
+        }
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare(
+            "SELECT v.VenueId, v.Name, v.Location, v.Capacity, v.Status
+             FROM dbo.Venues v
+             WHERE v.IsActive = 1 AND v.Status = N'Available' AND v.Capacity >= ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM dbo.Bookings b
+                 WHERE b.VenueId = v.VenueId
+                   AND b.BookingDate = ?
+                   AND b.Status IN (N'Approved', N'Rescheduled', N'Reschedule Proposed')
+                   AND b.StartTime < ? AND b.EndTime > ?
+               )
+             ORDER BY v.Capacity, v.Name"
+        );
+        $stmt->execute([$capacity, $date, $end, $start]);
+        $venues = array_map('mapVenue', $stmt->fetchAll());
+        // Filter by schedule if available
+        $free = [];
+        foreach ($venues as $v) {
+            $err = VenueScheduleService::validateSlot($v['id'], $date, $start, $end);
+            if ($err === null) {
+                $free[] = $v;
+            }
+        }
+        Response::json(['venues' => $free]);
     }
 
     Response::error('Not found.', 404);

@@ -21,6 +21,19 @@ class Settings
         'overlap_include_pending' => ['0',     '1 = pending requests also block the venue'],
         'conflict_auto_action'    => ['reschedule', 'When HR approves a booking, competing pending requests for the same time are: reschedule (nearest free slot, decline if none) or decline'],
         'reminder_hours_before'   => ['24',    'Reminder hours before event'],
+        'email_enabled'           => ['0',     '1 = attempt to send e-mail for notifications'],
+        'email_from'              => ['noreply@company.local', 'From address for notification e-mails'],
+        'email_smtp_host'         => ['',      'SMTP host (empty = use PHP mail())'],
+        'email_smtp_port'         => ['587',   'SMTP port'],
+        'email_smtp_user'         => ['',      'SMTP username'],
+        'email_smtp_pass'         => ['',      'SMTP password'],
+        'recurring_max_count'     => ['52',    'Maximum instances generated for a recurring series'],
+        'approval_rules_enabled'  => ['0',     '1 = use ApprovalRules table instead of hard-coded role map'],
+        'venue_hours_enabled'     => ['1',     '1 = enforce per-venue operating hours when set'],
+        'manager_sla_days'        => ['3',     'Days before Pending Manager auto-escalates to HR (0 = off)'],
+        'max_revisions'           => ['2',     'Max revision cycles before final decision required'],
+        'slot_policy'             => ['queue', 'queue = first to reach HR wins; hold_pending = pending blocks'],
+        'auto_complete_enabled'   => ['1',     '1 = past Approved/Rescheduled become Completed'],
     ];
 
     public static function get(string $key, ?string $default = null): ?string
@@ -60,8 +73,9 @@ class Settings
         return $out;
     }
 
-    public static function set(string $key, string $value): void
+    public static function set(string $key, string $value, ?array $actor = null): void
     {
+        $old = self::get($key);
         $desc = self::DEFAULTS[$key][1] ?? null;
         $pdo = Database::pdo();
         $pdo->prepare(
@@ -72,5 +86,18 @@ class Settings
                VALUES (s.k, s.v, s.d, SYSUTCDATETIME());'
         )->execute([$key, $value, $desc]);
         self::$cache[$key] = $value;
+
+        // Audit trail — only when value actually changed
+        if ((string)$old !== (string)$value) {
+            require_once __DIR__ . '/ActivityLog.php';
+            ActivityLog::write(
+                $actor['id'] ?? null,
+                $actor['email'] ?? null,
+                'settings.change',
+                'setting',
+                $key,
+                ['before' => $old, 'after' => $value]
+            );
+        }
     }
 }

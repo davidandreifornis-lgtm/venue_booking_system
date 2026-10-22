@@ -1,0 +1,88 @@
+<?php
+
+/**
+ * Explicit booking state transitions. Default deny.
+ * Call assertTransition() at the start of every mutating action.
+ */
+class BookingWorkflow
+{
+    /** @var array<string, list<string>> from => allowed to */
+    public const TRANSITIONS = [
+        'Pending Manager Validation' => [
+            'Pending HR Decision',
+            'Rejected by Manager',
+            'Revision Requested',
+            'Cancelled',
+        ],
+        'Revision Requested' => [
+            'Pending Manager Validation',
+            'Pending HR Decision',
+            'Cancelled',
+        ],
+        'Manager Validated' => [
+            'Pending HR Decision',
+            'Approved',
+            'Declined',
+            'Reschedule Proposed',
+            'Revision Requested',
+            'Cancelled',
+        ],
+        'Pending HR Decision' => [
+            'Approved',
+            'Declined',
+            'Reschedule Proposed',
+            'Revision Requested',
+            'Cancelled',
+        ],
+        'Reschedule Proposed' => [
+            'Approved',
+            'Declined',
+            'Pending HR Decision', // keep original, return to queue
+            'Approved', // accept
+            'Cancelled',
+        ],
+        'Approved' => [
+            'Cancelled',
+            'Completed',
+            'Rescheduled',
+            'Reschedule Proposed',
+            'No-Show',
+        ],
+        'Rescheduled' => [
+            'Cancelled',
+            'Completed',
+            'Reschedule Proposed',
+            'No-Show',
+        ],
+        'Declined' => [],
+        'Rejected by Manager' => [],
+        'Cancelled' => [],
+        'Completed' => ['No-Show'],
+        'No-Show' => [],
+    ];
+
+    public static function canTransition(string $from, string $to): bool
+    {
+        $allowed = self::TRANSITIONS[$from] ?? [];
+        return in_array($to, $allowed, true);
+    }
+
+    public static function assertTransition(string $from, string $to, string $action = 'change status'): void
+    {
+        if (!self::canTransition($from, $to)) {
+            require_once __DIR__ . '/Response.php';
+            Response::error("Cannot {$action}: transition from \"{$from}\" to \"{$to}\" is not allowed.", 409);
+        }
+    }
+
+    /** Who is the current process owner for notifications. */
+    public static function currentApproverRole(string $status): ?string
+    {
+        return match ($status) {
+            'Pending Manager Validation', 'Revision Requested' => 'Manager',
+            'Pending HR Decision', 'Manager Validated' => 'HR',
+            'Reschedule Proposed' => 'Requester',
+            default => null,
+        };
+    }
+}

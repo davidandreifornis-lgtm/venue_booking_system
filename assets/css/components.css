@@ -437,3 +437,24 @@ textarea.form-control { height: auto; min-height: 90px; padding: 8px 12px; }
   font-size: 0.875rem;
   margin-bottom: 14px;
 }
+
+/* Mobile-friendly form & modal tweaks */
+@media (max-width: 640px) {
+  .modal-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92vh;
+    margin: 0;
+    border-radius: 1rem 1rem 0 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .status-badge {
+    font-size: 0.7rem;
+  }
+}

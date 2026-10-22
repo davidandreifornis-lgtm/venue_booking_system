@@ -66,3 +66,82 @@ reports and backup procedure were **not** part of this request and are unchanged
 This update was written without PHP or SQL Server available, so **none of it has been executed**. The JavaScript
 was syntax-checked with Node and the PHP was checked for balanced structure only. Run
 `vendor/bin/phpunit tests/ConflictResolutionTest.php` against your `_Test` database before deploying.
+
+## Nice-to-have features (2026-10-20)
+
+All additions are **additive**. Existing create / approve / validate / settings flows are unchanged unless the new tables exist and the related setting is enabled.
+
+### 1. E-mail notifications
+- `MailService` + extended `NotificationService`
+- Settings: `email_enabled`, `email_from`, `email_smtp_*`
+- Columns on `Notifications`: EmailStatus, EmailError, EmailSentAt
+- Failures are written to the activity log (`email_failed`)
+
+### 2. Reports & analytics
+- New page `pages/reports.html` (HR + Administrator)
+- API: `/reports/utilization`, `/reports/peak-hours`, `/reports/turnaround`, `/reports/status-summary`
+- Permission: `reports.view`
+
+### 3. Per-venue operating hours & blackouts
+- Tables `VenueOperatingHours`, `VenueBlackouts`
+- API: `/venues/{id}/hours`, `/venues/{id}/blackouts`, `DELETE /blackouts/{id}`
+- `VenueScheduleService::validateSlot` is called from `BookingService::validatePayload` (skipped if tables missing)
+
+### 4. Recurring bookings (weekly)
+- Columns on `Bookings`: RecurrenceParentId, RecurrenceRule, IsRecurrenceInstance
+- `RecurrenceService::expandSeries` + `POST /bookings/{id}/expand-recurrence`
+- Rule example: `FREQ=WEEKLY;BYDAY=TU,TH;COUNT=8`
+
+### 5. Calendar polish
+- iCal export: `GET /calendar/ical?from=&to=`
+- Find free rooms: `GET /venues/find-free?date=&start=&end=&capacity=`
+
+### 6. Settings audit
+- `Settings::set` now writes `settings.change` to the activity log with before/after values
+
+### 7. Mobile UX
+- Expanded `@media` rules in `shell.css` and `components.css` for sidebar, tables, modals, forms
+
+### 8. Configurable approval rules (schema ready)
+- Table `ApprovalRules` + setting `approval_rules_enabled` (default 0 = keep current hard-coded map)
+- Seeded with Manager / HR / Admin rules matching existing behaviour
+
+### Database
+Run `database/11_nice_to_have.sql` after the existing 01–10 scripts.
+
+## Process-flow hardening (2026-10-20)
+
+Run `database/12_process_flow.sql` after 11.
+
+### Slot policy = Option B (queue)
+- Pending requests do **not** hold the venue.
+- First request to **reach HR** (manager validation time, or create time for Manager-made requests) wins when HR approves.
+- `GET /bookings/{id}/queue` returns position and competitors for transparency.
+- Ordering uses `ReachedHrAt` (set when entering Pending HR).
+
+### State machine
+- `BookingWorkflow` defines allowed transitions; mutating actions call `assertTransition`.
+
+### Manager stage
+- Managers may only validate **their own department**.
+- No active department manager → create goes straight to **Pending HR**.
+- `manager_sla_days` (default 3): `POST /bookings/escalate-manager-sla` moves overdue Pending Manager → Pending HR.
+
+### HR/Admin direct bookings
+- Require `bypassReason` (or `reason`) when creating an already-Approved booking.
+
+### Revision
+- HR/Admin can request revision from Pending HR (not only Manager from Pending Manager).
+- `max_revisions` (default 2) blocks further revision requests.
+
+### Reschedule reject
+- Default is **keep** original schedule and return to previous status (not auto-decline).
+- Pass `rejectAction: "withdraw"` to cancel instead.
+
+### Lifecycle
+- `POST /bookings/complete-past` → Approved/Rescheduled past end time become **Completed**.
+- `POST /bookings/{id}/no-show` → **No-Show** (HR/Admin).
+- User deactivate reassigns open Pending Manager items to HR and clears department manager link.
+
+### Approve race
+- Clearer error when another HR already decided (includes status / actor when available).
