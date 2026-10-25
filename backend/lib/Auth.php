@@ -10,14 +10,34 @@ class Auth
         $cfg = require __DIR__ . '/../config/config.php';
         if (session_status() === PHP_SESSION_NONE) {
             session_name($cfg['session']['name']);
+            $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+                || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+                || (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+                || !empty($cfg['session']['force_secure_cookie']);
             session_set_cookie_params([
                 'lifetime' => 0,
                 'path' => '/',
                 'httponly' => true,
                 'samesite' => 'Lax',
+                'secure' => $secure,
             ]);
             session_start();
         }
+    }
+
+    /**
+     * Password policy: min 10 chars, at least one letter and one digit.
+     * Returns null if OK, or an error message string.
+     */
+    public static function validatePassword(string $password): ?string
+    {
+        if (strlen($password) < 10) {
+            return 'Password must be at least 10 characters.';
+        }
+        if (!preg_match('/[A-Za-z]/', $password) || !preg_match('/[0-9]/', $password)) {
+            return 'Password must include at least one letter and one number.';
+        }
+        return null;
     }
 
     public static function user(): ?array

@@ -27,6 +27,7 @@ class Settings
         'email_smtp_port'         => ['587',   'SMTP port'],
         'email_smtp_user'         => ['',      'SMTP username'],
         'email_smtp_pass'         => ['',      'SMTP password'],
+        'app_base_url'            => ['',      'Public address of the app for links in e-mails, e.g. https://booking.company.local/venue_booking_system/pages (empty = detect automatically)'],
         'recurring_max_count'     => ['52',    'Maximum instances generated for a recurring series'],
         'approval_rules_enabled'  => ['0',     '1 = use ApprovalRules table instead of hard-coded role map'],
         'venue_hours_enabled'     => ['1',     '1 = enforce per-venue operating hours when set'],

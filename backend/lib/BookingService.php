@@ -172,6 +172,16 @@ class BookingService
     /** Mark past approved bookings as Completed. */
     public static function completePast(): void
     {
+        self::maybeRunScheduledJobs();
+        if (Settings::get('auto_complete_enabled', '1') !== '1') {
+            return;
+        }
+        self::runAutoComplete();
+    }
+
+    /** Approved/Rescheduled bookings whose end has passed (app timezone) become Completed. Returns how many. */
+    private static function runAutoComplete(): int
+    {
         $pdo = Database::pdo();
         $d = date('Y-m-d');
         $t = date('H:i:s');
@@ -180,7 +190,33 @@ class BookingService
         $bind = array_merge($st, [$d, $d, $t]);
         $pdo->prepare("INSERT INTO dbo.BookingStatusHistory (BookingId, FromStatus, ToStatus, ChangedByUserId, Reason)
                        SELECT BookingId, Status, 'Completed', NULL, 'Auto-completed after event' FROM dbo.Bookings WHERE $cond")->execute($bind);
-        $pdo->prepare("UPDATE dbo.Bookings SET Status = 'Completed', UpdatedAt = SYSUTCDATETIME() WHERE $cond")->execute($bind);
+        $upd = $pdo->prepare("UPDATE dbo.Bookings SET Status = 'Completed', UpdatedAt = SYSUTCDATETIME() WHERE $cond");
+        $upd->execute($bind);
+        return (int)$upd->rowCount();
+    }
+
+    /**
+     * There is no cron job in a plain XAMPP/IIS install, so the manager-SLA escalation would never run on its own.
+     * Piggy-back on normal traffic: at most once every 5 minutes (per server) and never twice in one request.
+     */
+    private static function maybeRunScheduledJobs(): void
+    {
+        static $done = false;
+        if ($done) {
+            return;
+        }
+        $done = true;
+        $stamp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vbs_jobs_' . md5(__DIR__) . '.stamp';
+        $last = @filemtime($stamp);
+        if ($last !== false && (time() - $last) < 300) {
+            return;
+        }
+        @touch($stamp);
+        try {
+            self::escalateOverdueManagerValidations();
+        } catch (Throwable $e) {
+            error_log('Scheduled escalation failed: ' . $e->getMessage());
+        }
     }
 
     public static function listForUser(array $user, array $params = []): array
@@ -196,7 +232,7 @@ class BookingService
         if ($user['role'] === 'Employee' || $scope === 'mine') {
             $where[] = 'b.RequesterUserId = ?';
             $bind[] = $user['id'];
-        } elseif ($user['role'] === 'Manager' && $scope !== 'all') {
+        } elseif ($user['role'] === 'Manager') {
             // Own department
             if ($user['departmentId']) {
                 $where[] = 'b.DepartmentId = ?';
@@ -335,9 +371,9 @@ class BookingService
         if (!empty($payload['venueId']) && !empty($payload['date']) && !empty($payload['startTime']) && !empty($payload['endTime'])) {
             $schedErr = VenueScheduleService::validateSlot(
                 (int)$payload['venueId'],
-                (string)$payload['date'],
-                (string)$payload['startTime'],
-                (string)$payload['endTime']
+                substr((string)$payload['date'], 0, 10),
+                substr((string)$payload['startTime'], 0, 5),
+                substr((string)$payload['endTime'], 0, 5)
             );
             if ($schedErr) {
                 $errors['schedule'] = $schedErr;
@@ -427,8 +463,12 @@ $conflict = self::findConflict(
                 $q->execute([$deptId]);
                 $mgrId = (int)$q->fetchColumn() ?: null;
             }
-            // Manager requests skip manager stage; HR/Admin create official (direct) bookings.
-            // Employees with no active department manager go straight to HR (process gap fix).
+            // Who needs whose approval:
+            //   Employee      -> department Manager -> HR (an Employee with no active manager goes straight to HR)
+            //   Manager       -> HR (manager step skipped)
+            //   HR / Admin    -> NO approver: their bookings are official and confirmed immediately.
+            // Whatever overlaps a confirmed booking is then handled automatically (see resolveCompetitors()).
+            // An optional written note (bypassReason / reason) is kept on the booking when one is given.
             $initial = self::STATUS_PENDING_MANAGER;
             $bypassReason = null;
             $reachedHrAt = null;
@@ -437,13 +477,10 @@ $conflict = self::findConflict(
                 $mgrId = null;
                 $reachedHrAt = true;
             } elseif (in_array($user['role'], ['HR', 'Administrator'], true)) {
-                $initial = self::STATUS_APPROVED;
                 $mgrId = null;
-                $bypassReason = trim((string)($payload['bypassReason'] ?? $payload['reason'] ?? ''));
-                if ($bypassReason === '') {
-                    $pdo->rollBack();
-                    Response::error('A reason is required when creating an official (direct) booking that skips the approval workflow.', 422);
-                }
+                $initial = self::STATUS_APPROVED;
+                $note = trim((string)($payload['bypassReason'] ?? $payload['reason'] ?? ''));
+                $bypassReason = $note !== '' ? $note : null;
             } elseif ($user['role'] === 'Employee' && !$mgrId) {
                 // No active manager for department → escalate to HR immediately
                 $initial = self::STATUS_PENDING_HR;
@@ -459,7 +496,7 @@ $conflict = self::findConflict(
                        BookingDate, StartTime, EndTime, Purpose, EventType, Attendees,
                        AdditionalRequirements, Status, ReachedHrAt, BypassReason)
                      OUTPUT INSERTED.BookingId
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (CASE WHEN CAST(? AS INT) = 1 THEN SYSUTCDATETIME() ELSE NULL END), ?)"
                 );
                 $stmt->execute([
                     $ref,
@@ -475,8 +512,8 @@ $conflict = self::findConflict(
                     max(1, (int)($payload['attendees'] ?? 1)),
                     $payload['additionalRequirements'] ?? null,
                     $initial,
-                    $reachedHrAt ? date('Y-m-d H:i:s') : null,
-                    $bypassReason,
+                    $reachedHrAt ? 1 : 0, // timestamp is taken from the DB clock (UTC), same as validation time
+                    $bypassReason !== null ? self::clip($bypassReason, 500) : null,
                 ]);
             } else {
                 $stmt = $pdo->prepare(
@@ -508,7 +545,8 @@ $conflict = self::findConflict(
             RequirementOptions::attach($pdo, $id, $reqItems);
             $histMsg = 'Submitted';
             if ($initial === self::STATUS_APPROVED) {
-                $histMsg = 'Official booking (direct): ' . ($bypassReason ?: 'n/a');
+                $histMsg = 'Official booking by ' . $user['role'] . ' (confirmed immediately, no approver needed)'
+                    . ($bypassReason ? ': ' . $bypassReason : '');
             } elseif ($initial === self::STATUS_PENDING_HR && $user['role'] === 'Employee' && !$mgrId) {
                 $histMsg = 'Submitted — no active department manager; escalated to HR';
             } elseif ($initial === self::STATUS_PENDING_HR && $user['role'] === 'Manager') {
@@ -533,7 +571,17 @@ $conflict = self::findConflict(
                 );
             }
 
-            return self::getById($id);
+            $created = self::getById($id);
+            if ($initial === self::STATUS_APPROVED) {
+                // A confirmed HR/Admin booking wins over requests still waiting for HR at an overlapping time:
+                // they are moved to the nearest free slot (or declined) and their requesters are told.
+                $resolved = self::resolveCompetitors($created, $user);
+                if ($resolved) {
+                    ActivityLog::write($user['id'], $user['email'], 'booking.auto_resolve', 'booking', (string)$id, ['results' => $resolved]);
+                    $created['autoResolved'] = $resolved;
+                }
+            }
+            return $created;
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -629,7 +677,9 @@ $conflict = self::findConflict(
             Response::error('Booking is not awaiting HR decision.', 409);
         }
         BookingWorkflow::assertTransition($b['status'], self::STATUS_APPROVED, 'approve');
-        if ($b['requesterId'] === $user['id']) {
+        // Employees/Managers can never approve their own request. HR/Admin bookings need no approver, so one that is
+        // still pending (created before this rule was restored) may be confirmed by its owner.
+        if ($b['requesterId'] === $user['id'] && !in_array($user['role'], ['HR', 'Administrator'], true)) {
             Response::error('You cannot approve your own request.', 403);
         }
 
@@ -845,12 +895,27 @@ $conflict = self::findConflict(
                 if (!BookingWorkflow::canTransition(self::STATUS_PROPOSED, $restore)) {
                     $restore = self::STATUS_PENDING_HR;
                 }
-                $pdo->prepare(
-                    "UPDATE dbo.Bookings SET Status = ?, ProposedVenueId = NULL, ProposedDate = NULL, ProposedStartTime = NULL,
-                        ProposedEndTime = NULL, StatusBeforeProposal = NULL, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
-                )->execute([$restore, $id]);
-                self::history($pdo, $id, self::STATUS_PROPOSED, $restore, $user['id'],
-                    $reason ?: 'Requester rejected proposal; original schedule retained and returned to queue');
+                // A request that was moved automatically because ANOTHER booking took its slot cannot go back to HR's
+                // queue (it could never be approved): it is declined with a clear reason instead of getting stuck.
+                $held = in_array($restore, [self::STATUS_PENDING_HR, self::STATUS_MANAGER_VALIDATED], true)
+                    ? self::findConfirmedConflict((int)$b['venueId'], $b['date'], $b['startTime'], $b['endTime'], $id)
+                    : null;
+                if ($held) {
+                    $declineWhy = self::clip('Proposal rejected and the original time is no longer available (' . $held['ReferenceCode'] . ' holds it).', 900);
+                    $pdo->prepare(
+                        "UPDATE dbo.Bookings SET Status = ?, DeclineReason = ?, HrNotes = ?, DecidedAt = SYSUTCDATETIME(),
+                            ProposedVenueId = NULL, ProposedDate = NULL, ProposedStartTime = NULL, ProposedEndTime = NULL,
+                            StatusBeforeProposal = NULL, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+                    )->execute([self::STATUS_DECLINED, $declineWhy, $declineWhy, $id]);
+                    self::history($pdo, $id, self::STATUS_PROPOSED, self::STATUS_DECLINED, $user['id'], $declineWhy);
+                } else {
+                    $pdo->prepare(
+                        "UPDATE dbo.Bookings SET Status = ?, ProposedVenueId = NULL, ProposedDate = NULL, ProposedStartTime = NULL,
+                            ProposedEndTime = NULL, StatusBeforeProposal = NULL, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+                    )->execute([$restore, $id]);
+                    self::history($pdo, $id, self::STATUS_PROPOSED, $restore, $user['id'],
+                        $reason ?: 'Requester rejected proposal; original schedule retained and returned to queue');
+                }
             }
         }
         ActivityLog::write($user['id'], $user['email'], 'booking.reschedule_response', 'booking', (string)$id, ['accept' => $accept]);
@@ -898,12 +963,12 @@ $conflict = self::findConflict(
             if ($curRev >= $maxRev) {
                 Response::error("Maximum revisions ({$maxRev}) reached. Please approve or decline this request.", 409);
             }
+            // Manager comments go to ManagerNotes, HR/Admin comments to HrNotes (column chosen here, not in SQL).
+            $noteCol = in_array($user['role'], ['HR', 'Administrator'], true) ? 'HrNotes' : 'ManagerNotes';
             $pdo->prepare(
-                "UPDATE dbo.Bookings SET Status = ?, RevisionCount = RevisionCount + 1,
-                    ManagerNotes = CASE WHEN ? = N'Manager' THEN ? ELSE ManagerNotes END,
-                    HrNotes = CASE WHEN ? IN (N'HR', N'Administrator') THEN ? ELSE HrNotes END,
+                "UPDATE dbo.Bookings SET Status = ?, RevisionCount = RevisionCount + 1, {$noteCol} = ?,
                     UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
-            )->execute([self::STATUS_REVISION, $user['role'], $notes, $user['role'], $notes, $id]);
+            )->execute([self::STATUS_REVISION, $notes, $id]);
         } else {
             $pdo->prepare("UPDATE dbo.Bookings SET Status = ?, ManagerNotes = ?, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?")
                 ->execute([self::STATUS_REVISION, $notes, $id]);
@@ -1299,6 +1364,26 @@ $conflict = self::findConflict(
             Response::error('This booking has already ended.', 409);
         }
 
+        // Optional: HR/Admin also books the freed time for themselves in the same step, so nobody can grab the
+        // slot between the override and the emergency booking (HR/Admin bookings are confirmed immediately).
+        $takePayload = null;
+        if (!empty($payload['takeOver'])) {
+            $takePurpose = trim((string)($payload['purpose'] ?? ''));
+            if ($takePurpose === '') {
+                Response::error('Describe what the venue is needed for (purpose) to book it for yourself.', 422);
+            }
+            $takePayload = [
+                'venueId' => (int)$b['venueId'], 'date' => $b['date'], 'startTime' => $b['startTime'], 'endTime' => $b['endTime'],
+                'purpose' => self::clip($takePurpose, 500), 'attendees' => max(1, (int)($payload['attendees'] ?? 1)),
+                'requirements' => [],
+            ];
+            // The booking being overridden is ignored for the conflict check, because it is about to leave this slot.
+            $preErrors = self::validatePayload($takePayload, $id, $user);
+            if ($preErrors) {
+                Response::error(reset($preErrors), 422, ['errors' => $preErrors]);
+            }
+        }
+
         $mode = (($payload['mode'] ?? 'cancel') === 'reschedule') ? 'reschedule' : 'cancel';
         $note = self::clip('Emergency override by ' . $user['role'] . ': ' . $reason, 900);
         $live = [self::STATUS_APPROVED, self::STATUS_RESCHEDULED, self::STATUS_PROPOSED];
@@ -1322,6 +1407,16 @@ $conflict = self::findConflict(
                     Response::error('No free slot was found in the next ' . self::AUTO_SEARCH_DAYS . ' days. Pick a time manually or cancel the booking.', 409);
                 }
                 $slot = ['venueId' => (int)$b['venueId'], 'date' => $found['date'], 'start' => $found['start'], 'end' => $found['end']];
+            }
+            if ($takePayload && $slot['venueId'] === (int)$b['venueId'] && $slot['date'] === $b['date']) {
+                $ns = self::toMinutes($slot['start']);
+                $ne = self::toMinutes($slot['end']);
+                $os = self::toMinutes($b['startTime']);
+                $oe = self::toMinutes($b['endTime']);
+                $buf = self::bufferMinutes();
+                if ($ns !== null && $ne !== null && $os !== null && $oe !== null && $ns < $oe + $buf && $ne > $os - $buf) {
+                    Response::error('The new time overlaps the time you want to use yourself. Choose a different time.', 422);
+                }
             }
             $merged = array_merge($b, ['venueId' => $slot['venueId'], 'date' => $slot['date'], 'startTime' => $slot['start'], 'endTime' => $slot['end']]);
             $errors = self::validatePayload($merged, $id);
@@ -1389,7 +1484,15 @@ $conflict = self::findConflict(
         if ($b['departmentManagerId'] && $b['departmentManagerId'] !== $user['id']) {
             NotificationService::notify($b['departmentManagerId'], $title, self::clip($msg, 900), $link);
         }
-        return self::getById($id);
+
+        $result = self::getById($id);
+        if ($takePayload) {
+            $mine = self::create($user, $takePayload + [
+                'bypassReason' => self::clip('Emergency override of ' . $b['ref'] . ': ' . $reason, 500),
+            ]);
+            $result['takeOverBooking'] = ['id' => $mine['id'] ?? null, 'ref' => $mine['ref'] ?? null, 'status' => $mine['status'] ?? null];
+        }
+        return $result;
     }
 
     /** Adds 'competing' (other pending-HR requests that overlap) and 'firstInLine' to rows HR is about to decide on. */
@@ -1602,11 +1705,19 @@ $conflict = self::findConflict(
      * Option B queue: order by ReachedHrAt (who reached HR first).
      * Pending does not hold the slot; first HR approval wins.
      */
-    public static function queuePosition(int $bookingId): array
+    public static function queuePosition(int $bookingId, ?array $viewer = null): array
     {
         $b = self::getById($bookingId);
         if (!$b) {
             return ['position' => null, 'competitors' => []];
+        }
+        $isStaff = $viewer && in_array($viewer['role'] ?? '', ['HR', 'Administrator'], true);
+        if ($viewer && !$isStaff) {
+            $ownDept = ($viewer['role'] ?? '') === 'Manager' && !empty($viewer['departmentId'])
+                && (int)$viewer['departmentId'] === (int)$b['departmentId'];
+            if ($b['requesterId'] !== $viewer['id'] && !$ownDept) {
+                Response::error('Forbidden.', 403);
+            }
         }
         $pdo = Database::pdo();
         $hasReached = self::hasColumn($pdo, 'Bookings', 'ReachedHrAt');
@@ -1638,7 +1749,7 @@ $conflict = self::findConflict(
                 'id' => (int)$r['BookingId'],
                 'ref' => $r['ReferenceCode'],
                 'requester' => $r['RequesterName'],
-                'reachedHrAt' => $r['QueuedAt'],
+                'reachedHrAt' => self::fmtStamp($r['QueuedAt'] ?? null),
                 'position' => $i,
             ];
             if ((int)$r['BookingId'] === $bookingId) {
@@ -1646,13 +1757,17 @@ $conflict = self::findConflict(
             }
             $competitors[] = $item;
         }
+        if ($viewer && !$isStaff) {
+            // Requesters see where they stand, never who else is asking for the room.
+            $competitors = [];
+        }
         return [
             'position' => $position,
-            'totalInQueue' => count($competitors),
+            'totalInQueue' => count($rows),
             'competitors' => $competitors,
             'policy' => 'queue',
             'message' => $position
-                ? "You are #{$position} of " . count($competitors) . " for this slot (first to reach HR wins)."
+                ? "You are #{$position} of " . count($rows) . " for this slot (first to reach HR wins)."
                 : 'Not in the HR decision queue for this slot.',
         ];
     }
@@ -1663,15 +1778,7 @@ $conflict = self::findConflict(
         if (Settings::get('auto_complete_enabled', '1') !== '1') {
             return ['completed' => 0, 'skipped' => true];
         }
-        $pdo = Database::pdo();
-        // Compare in local app timezone via date functions on BookingDate + EndTime
-        $sql = "UPDATE dbo.Bookings
-                SET Status = ?, UpdatedAt = SYSUTCDATETIME()
-                WHERE Status IN (?, ?)
-                  AND DATEADD(SECOND, DATEDIFF(SECOND, 0, EndTime), CAST(BookingDate AS DATETIME2)) < SYSUTCDATETIME()";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([self::STATUS_COMPLETED, self::STATUS_APPROVED, self::STATUS_RESCHEDULED]);
-        $n = $stmt->rowCount();
+        $n = self::runAutoComplete();
         if ($n > 0) {
             ActivityLog::write(null, null, 'booking.auto_complete', 'booking', null, ['count' => $n]);
         }
@@ -1687,6 +1794,10 @@ $conflict = self::findConflict(
         }
         if (!in_array($b['status'], [self::STATUS_APPROVED, self::STATUS_RESCHEDULED, self::STATUS_COMPLETED], true)) {
             Response::error('Only approved or completed bookings can be marked no-show.', 409);
+        }
+        $startTs = strtotime($b['date'] . ' ' . $b['startTime']);
+        if ($startTs === false || $startTs > time()) {
+            Response::error('A booking can only be marked no-show after its start time has passed.', 409);
         }
         BookingWorkflow::assertTransition(
             $b['status'] === self::STATUS_COMPLETED ? self::STATUS_COMPLETED : self::STATUS_APPROVED,

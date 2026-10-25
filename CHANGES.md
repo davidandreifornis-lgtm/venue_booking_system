@@ -128,7 +128,7 @@ Run `database/12_process_flow.sql` after 11.
 - `manager_sla_days` (default 3): `POST /bookings/escalate-manager-sla` moves overdue Pending Manager → Pending HR.
 
 ### HR/Admin direct bookings
-- Require `bypassReason` (or `reason`) when creating an already-Approved booking.
+- (Reverted) HR/Admin bookings are confirmed immediately again; a note is optional.
 
 ### Revision
 - HR/Admin can request revision from Pending HR (not only Manager from Pending Manager).
@@ -145,3 +145,8 @@ Run `database/12_process_flow.sql` after 11.
 
 ### Approve race
 - Clearer error when another HR already decided (includes status / actor when available).
+
+## Bug-fix pass (see BUGFIXES.md)
+Reports page rebuilt, un-savable settings fixed, e-mail/SMTP hardened, queue/iCal permissions, recurrence safety,
+UTC/local timestamp mix-up, stuck auto-proposals, and an emergency "book it for me now" option. Run
+`database/10`, `11`, `12` if you have not, then the tests.

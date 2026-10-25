@@ -67,7 +67,9 @@ class VenueScheduleService
                 ['days' => count($days)]
             );
         } catch (Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             throw $e;
         }
     }
@@ -140,8 +142,8 @@ class VenueScheduleService
 
         // Blackouts
         if (self::tableExists($pdo, 'VenueBlackouts')) {
-            $startAt = $date . ' ' . $startTime;
-            $endAt   = $date . ' ' . $endTime;
+            $startAt = substr($date, 0, 10) . ' ' . substr($startTime, 0, 5);
+            $endAt   = substr($date, 0, 10) . ' ' . substr($endTime, 0, 5);
             $stmt = $pdo->prepare(
                 'SELECT TOP 1 Reason FROM dbo.VenueBlackouts
                  WHERE VenueId = ? AND StartAt < ? AND EndAt > ?'
@@ -154,14 +156,15 @@ class VenueScheduleService
             }
         }
 
-        // Operating hours for that weekday
+        // Operating hours for that weekday. The weekday is worked out here (0 = Sunday ... 6 = Saturday) instead of
+        // with SQL Server's DATEPART(WEEKDAY), which changes meaning with the server's DATEFIRST / language setting.
         if (self::tableExists($pdo, 'VenueOperatingHours')) {
+            $dow = (int)date('w', strtotime($date));
             $stmt = $pdo->prepare(
                 'SELECT OpenTime, CloseTime, IsClosed FROM dbo.VenueOperatingHours
-                 WHERE VenueId = ? AND DayOfWeek = DATEPART(WEEKDAY, ?) - 1'
+                 WHERE VenueId = ? AND DayOfWeek = ?'
             );
-            // SQL Server DATEPART(WEEKDAY) is 1=Sunday..7=Saturday by default; we store 0=Sun..6=Sat
-            $stmt->execute([$venueId, $date]);
+            $stmt->execute([$venueId, $dow]);
             $h = $stmt->fetch();
             if ($h) {
                 if ((int)$h['IsClosed']) {
@@ -169,7 +172,7 @@ class VenueScheduleService
                 }
                 $open = substr((string)$h['OpenTime'], 0, 5);
                 $close = substr((string)$h['CloseTime'], 0, 5);
-                if ($startTime < $open || $endTime > $close) {
+                if (substr($startTime, 0, 5) < $open || substr($endTime, 0, 5) > $close) {
                     return "Booking must be within venue hours ({$open}–{$close}).";
                 }
             }

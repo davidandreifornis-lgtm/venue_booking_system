@@ -8,11 +8,11 @@
   - No GO batch separators (works in Navicat / DBeaver / HeidiSQL / ODBC)
   - Database must already exist: CREATE DATABASE VenueBooking;  (once)
 
-  Demo logins (password = same as login name):
-    admin    / admin
-    hr       / hr
-    manager  / manager
-    employee / employee
+  Demo logins (DEVELOPMENT ONLY - change or delete before real use):
+    admin    / Admin@2026!
+    hr       / Hr@2026!xx
+    manager  / Mgr@2026!x
+    employee / Emp@2026!x
   =============================================================================
 */
 
@@ -409,11 +409,11 @@ DECLARE @DeptEng INT = (SELECT DepartmentId FROM dbo.Departments WHERE Name = N'
 DECLARE @DeptHR  INT = (SELECT DepartmentId FROM dbo.Departments WHERE Name = N'Human Resources');
 DECLARE @DeptOps INT = (SELECT DepartmentId FROM dbo.Departments WHERE Name = N'Operations');
 
-/* bcrypt: password_hash for admin / hr / manager / employee */
-DECLARE @HAdmin    NVARCHAR(255) = N'$2y$10$VsbXStPxSQ8c/ILCv7ORbuKKcA0.6KEozEzNaQSeGWda39vG3YTdK';
-DECLARE @HHr       NVARCHAR(255) = N'$2y$10$aBGkU/tsl4tIqIyVCIZokOlWANWOgns1g/xo.bcGRYxo6G.JH9gBa';
-DECLARE @HManager  NVARCHAR(255) = N'$2y$10$6DseVhqIJwwzaFWIuBhy6OA.evHJ9oleO5WaDflW/5yH5yknzLNEK';
-DECLARE @HEmployee NVARCHAR(255) = N'$2y$10$dAI5c3W1dT85pZZ5EUvS.uG..bbTsz2D/hKPTEHMLI4aLChynVgui';
+/* bcrypt hashes of the demo passwords listed in the header (same as 02_seed.sql) */
+DECLARE @HAdmin    NVARCHAR(255) = N'$2y$10$F7gRImhVbTsCNEhEe8bFfOM4ZH4h0WGEZLoyAGxv5NfSXBDMjokFe';
+DECLARE @HHr       NVARCHAR(255) = N'$2y$10$lVcfgbt4GW6nmCt9ZYFbpO7Y.lUJDba5zAsuR4QXXmMICkwx/dV.O';
+DECLARE @HManager  NVARCHAR(255) = N'$2y$10$CwYOcPlMVBniVC9hgTOm1umWfEx2aPtKOyanriEYLz5ybtk5dR26S';
+DECLARE @HEmployee NVARCHAR(255) = N'$2y$10$YjJ1/s9l9niYpE1cOCpMjOe4vVnPiJNJUX6ot8se9ip2sdy8bfNCy';
 
 INSERT INTO dbo.Users (Email, PasswordHash, FullName, RoleId, DepartmentId) VALUES
   (N'admin@company.local',    @HAdmin,    N'System Administrator', 4, NULL),
@@ -452,5 +452,5 @@ INSERT INTO dbo.ApprovalRules (Name, RoleCode, Stage, DepartmentId, SortOrder) V
 
 PRINT N'Seed complete.';
 PRINT N'';
-PRINT N'Demo logins: admin/admin  hr/hr  manager/manager  employee/employee';
+PRINT N'Demo logins: admin/Admin@2026!  hr/Hr@2026!xx  manager/Mgr@2026!x  employee/Emp@2026!x';
 PRINT N'00_FULL_RESET.sql finished successfully.';

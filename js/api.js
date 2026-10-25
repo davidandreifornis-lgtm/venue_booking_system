@@ -113,6 +113,27 @@ export function cancelBooking(id, payload) {
   return request('POST', `/bookings/${id}/cancel`, payload);
 }
 
+/** HR/Admin only: name = utilization | peak-hours | turnaround | status-summary. params: { from, to } (YYYY-MM-DD). */
+export function getReport(name, params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  return request('GET', `/reports/${name}${qs ? `?${qs}` : ''}`);
+}
+
+/** Where a request stands in HR's first-come queue for its time slot. */
+export function getQueue(id) {
+  return request('GET', `/bookings/${id}/queue`);
+}
+
+/** HR/Admin: mark an approved booking whose start time has passed as a no-show. */
+export function markNoShow(id, payload) {
+  return request('POST', `/bookings/${id}/no-show`, payload);
+}
+
+/** Repeat a booking weekly. rule example: FREQ=WEEKLY;BYDAY=TU,TH;COUNT=8 */
+export function expandRecurrence(id, rule) {
+  return request('POST', `/bookings/${id}/expand-recurrence`, { rule });
+}
+
 /** HR/Admin only: move or cancel an already-approved booking in an emergency. payload: { mode, reason, date?, startTime?, endTime? } */
 export function emergencyOverride(id, payload) {
   return request('POST', `/bookings/${id}/emergency-override`, payload);

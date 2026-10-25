@@ -5,6 +5,19 @@
  * Optional override: backend/config/config.local.php
  */
 
+/**
+ * The database cannot be reached or is not configured. The detailed message (server, driver text) is for logs and
+ * debug mode; userMessage() is safe to show on the login page.
+ */
+class DatabaseUnavailableException extends RuntimeException
+{
+    public function userMessage(): string
+    {
+        return 'Cannot connect to the database. Check the server name, login and password in '
+            . 'backend/config/config.local.php (or the VBS_DB_* environment variables), then try again.';
+    }
+}
+
 class Database
 {
     private static ?PDO $pdo = null;
@@ -66,7 +79,7 @@ class Database
         }
 
         if ($driver === 'sqlsrv' && !in_array('sqlsrv', PDO::getAvailableDrivers(), true)) {
-            throw new RuntimeException(
+            throw new DatabaseUnavailableException(
                 'PDO sqlsrv driver missing. Enable php_pdo_sqlsrv in php.ini and install ODBC Driver for SQL Server.'
             );
         }
@@ -86,10 +99,10 @@ class Database
                 PDO::ATTR_EMULATE_PREPARES   => false,
             ]);
         } catch (PDOException $e) {
-            throw new PDOException(
+            throw new DatabaseUnavailableException(
                 'Database connection failed: ' . $e->getMessage()
-                . " (Server={$server}" . ($port !== '' ? ",{$port}" : '') . "; Database={$database})",
-                (int) $e->getCode(),
+                . " (Server={$server}" . ($port !== '' ? ",{$port}" : '') . "; Database={$database}; Login={$user})",
+                0,
                 $e
             );
         }

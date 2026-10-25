@@ -1,26 +1,47 @@
+UPDATING FROM AN OLDER COPY (important)
+   Do NOT overwrite these two files with the ones from a zip - they hold YOUR database login:
+       backend/config/database.php
+       backend/config/config.local.php
+   If you did, or if login says "Cannot connect to the database", create/edit
+   backend/config/config.local.php (copy config.local.example.php) with your real server, database,
+   username and password, e.g.
+       return ['server'=>'VMAPPS2','database'=>'VenueBooking','username'=>'your_login','password'=>'your_password'];
+   Quick check: open  http://localhost/venue_booking_system/backend/api/index.php?r=/health
+
 Venue Booking System — XAMPP install (VMAPPS2 / VenueBooking)
 
 1. Copy this whole folder to:
    C:\xampp\htdocs\venue_booking_system\
 
-2. Database is already configured in:
-   backend/config/database.php
-   (server=VMAPPS2, database=VenueBooking, user=sa_dev)
+2. Database credentials:
+   - Prefer environment variables: VBS_DB_SERVER, VBS_DB_NAME, VBS_DB_USER, VBS_DB_PASSWORD
+   - Or copy backend/config/config.local.example.php → config.local.php and set values
+   - Do not use sa / high-privilege SQL login in production
+   - Default placeholders live in backend/config/database.php (password empty by design)
 
-3. If Settings table is empty, run in SSMS/Navicat:
-   database/04_fix_settings.sql
+3. Schema / seed (SSMS or Navicat), in order if starting fresh:
+   database/01_schema.sql
+   database/02_seed.sql          (demo users with strong passwords)
+   database/03_seed_demo_data.sql (optional sample bookings)
+   database/04_fix_settings.sql … through 12_process_flow.sql as needed
 
-4. Test DB:
+4. Test DB (minimal public response unless VBS_HEALTH_TOKEN is set):
    http://localhost/venue_booking_system/backend/api/health.php
    http://localhost/venue_booking_system/backend/api/index.php?r=/health
 
 5. Login page:
    http://localhost/venue_booking_system/pages/login.html
 
-   employee / employee
-   manager  / manager
-   hr       / hr
-   admin    / admin
+   DEMO ONLY (change before production):
+   employee / Emp@2026!x
+   manager  / Mgr@2026!x
+   hr       / Hr@2026!xx
+   admin    / Admin@2026!
+
+   Password policy: min 10 characters, letter + number.
+
+6. Optional: set VBS_DEBUG=1 for detailed API errors during local debugging.
+   See SECURITY_FIXES.md for self-approval and hardening details.
 
 API calls use:
   /venue_booking_system/backend/api/index.php?r=/auth/login

@@ -154,8 +154,8 @@
             ${ROLES.map((r) => `<option value="${r}" ${role === r ? 'selected' : ''}>${r}</option>`).join('')}
           </select></div>
           <div><label ${lbl}>${isNew ? 'Password' : 'New password'}</label>
-            <input name="password" type="password" autocomplete="new-password" minlength="6" ${f} ${isNew ? 'required' : ''} placeholder="${isNew ? '' : 'Leave blank to keep current password'}" />
-            <p class="text-xs text-muted mt-1">At least 6 characters.</p></div>
+            <input name="password" type="password" autocomplete="new-password" minlength="10" ${f} ${isNew ? 'required' : ''} placeholder="${isNew ? '' : 'Leave blank to keep current password'}" />
+            <p class="text-xs text-muted mt-1">At least 10 characters, with a letter and a number.</p></div>
         </div>`,
       });
       if (!data) return;

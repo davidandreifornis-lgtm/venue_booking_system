@@ -39,15 +39,37 @@ class NotificationService
         }
     }
 
+    private static ?bool $emailColumns = null;
+
     private static function hasEmailColumns(PDO $pdo): bool
     {
+        if (self::$emailColumns !== null) {
+            return self::$emailColumns;
+        }
         try {
             $chk = $pdo->query("SELECT COL_LENGTH('dbo.Notifications','EmailStatus') AS c");
             $r = $chk ? $chk->fetch() : null;
-            return $r && $r['c'] !== null;
+            self::$emailColumns = (bool)($r && $r['c'] !== null);
         } catch (Throwable $e) {
-            return false;
+            self::$emailColumns = false;
         }
+        return self::$emailColumns;
+    }
+
+    /** Links are stored relative to /pages/ (booking-details.html?id=1). E-mail needs a full address to be clickable. */
+    private static function absoluteLink(?string $link): ?string
+    {
+        if ($link === null || $link === '' || preg_match('#^https?://#i', $link)) {
+            return $link;
+        }
+        require_once __DIR__ . '/Settings.php';
+        $base = trim((string)Settings::get('app_base_url'));
+        if ($base === '' && !empty($_SERVER['HTTP_HOST'])) {
+            $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (int)($_SERVER['SERVER_PORT'] ?? 0) === 443;
+            $root = preg_replace('#/backend/.*$#', '', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+            $base = ($https ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'] . $root . '/pages';
+        }
+        return $base === '' ? $link : rtrim($base, '/') . '/' . ltrim($link, '/');
     }
 
     private static function trySendEmail(int $notifId, int $userId, string $title, string $body, ?string $link): void
@@ -56,12 +78,14 @@ class NotificationService
         $u = $pdo->prepare('SELECT Email, FullName FROM dbo.Users WHERE UserId = ?');
         $u->execute([$userId]);
         $user = $u->fetch();
-        if (!$user || empty($user['Email'])) {
+        if (!$user || empty($user['Email']) || !filter_var($user['Email'], FILTER_VALIDATE_EMAIL)) {
+            // Demo/short logins such as "admin" are not mailboxes: record it quietly, it is not a delivery failure.
             $pdo->prepare(
-                "UPDATE dbo.Notifications SET EmailStatus = N'failed', EmailError = N'No e-mail on user' WHERE NotificationId = ?"
+                "UPDATE dbo.Notifications SET EmailStatus = N'skipped', EmailError = N'User has no valid e-mail address' WHERE NotificationId = ?"
             )->execute([$notifId]);
             return;
         }
+        $link = self::absoluteLink($link);
 
         $html = '<p>' . htmlspecialchars($body) . '</p>';
         if ($link) {
@@ -78,7 +102,7 @@ class NotificationService
         } else {
             $pdo->prepare(
                 "UPDATE dbo.Notifications SET EmailStatus = N'failed', EmailError = ? WHERE NotificationId = ?"
-            )->execute([mb_substr((string)$result['error'], 0, 500), $notifId]);
+            )->execute([function_exists('mb_substr') ? mb_substr((string)$result['error'], 0, 500) : substr((string)$result['error'], 0, 500), $notifId]);
             require_once __DIR__ . '/ActivityLog.php';
             ActivityLog::write(
                 null,

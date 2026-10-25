@@ -139,22 +139,23 @@ final class ChecklistTest extends VbsTestCase
         $this->assertNotSame('Approved', $this->statusOf($b['id']));
     }
 
-    public function test03b_hr_booking_is_not_self_approved_and_goes_to_an_alternative_approver(): void
+    public function test03b_hr_and_admin_bookings_are_confirmed_without_an_approver(): void
     {
         $hr = $this->mkUser('HR', 'self.hr');
         $admin = $this->mkUser('Administrator', 'self.admin');
         $v = $this->mkVenue('Self Hall HR');
 
         $b = BookingService::create($hr, $this->payload($v, $this->date(), '09:00', '10:00'));
-        $this->assertNotSame('Approved', $b['status'],
-            'HR booking was confirmed at creation with no second approver. It must wait for an eligible alternative approver.');
+        $this->assertSame('Approved', $b['status'], 'HR bookings are official and need no approver.');
 
-        $this->assertRejected(fn() => BookingService::approve($hr, $b['id'], []), [403, 409]);
-        $this->assertNotSame('Approved', $this->statusOf($b['id']), 'HR approved their own booking.');
+        $b2 = BookingService::create($admin, $this->payload($v, $this->date(), '13:00', '14:00'));
+        $this->assertSame('Approved', $b2['status'], 'Administrator bookings are official and need no approver.');
 
-        $done = BookingService::approve($admin, $b['id'], []);
-        $this->assertSame('Approved', $done['status']);
-        $this->assertSame($admin['id'], (int)$this->row($b['id'])['DecidedByUserId']);
+        // Employees still can never approve themselves.
+        $emp = $this->mkUser('Employee', 'self.emp');
+        $eb = BookingService::create($emp, $this->payload($v, $this->date(), '15:00', '16:00'));
+        $this->assertNotSame('Approved', $eb['status']);
+        $this->assertRejected(fn() => BookingService::approve($emp, $eb['id'], []), [403, 409]);
     }
 
     public function test03c_admin_booking_is_not_self_approved(): void

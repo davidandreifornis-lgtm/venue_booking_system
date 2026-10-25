@@ -100,8 +100,12 @@ if ($method === 'GET' && ($path === '/health' || $path === '/api/health' || str_
 try {
     route($method, $path, $body);
 } catch (Throwable $e) {
-    $msg = $config['app']['debug'] ? $e->getMessage() : 'Internal server error.';
     error_log($e->getMessage() . "\n" . $e->getTraceAsString());
+    if ($e instanceof DatabaseUnavailableException) {
+        // Not a code bug: the database is unreachable or the login/password is wrong. Say so (503), without secrets.
+        Response::error($config['app']['debug'] ? $e->getMessage() : $e->userMessage(), 503);
+    }
+    $msg = $config['app']['debug'] ? $e->getMessage() : 'Internal server error.';
     Response::error($msg, 500);
 }
 
@@ -366,8 +370,9 @@ function route(string $method, string $path, array $body): void
         if ($email === '' || $name === '' || $password === '') {
             Response::error('Email, name, and password are required.', 422);
         }
-        if (strlen($password) < 6) {
-            Response::error('Password must be at least 6 characters.', 422);
+        $pwErr = Auth::validatePassword($password);
+        if ($pwErr) {
+            Response::error($pwErr, 422);
         }
         $roleId = roleId($role);
         if (!$roleId) {
@@ -406,8 +411,11 @@ function route(string $method, string $path, array $body): void
         if (isset($body['role']) && !$roleId) {
             Response::error('Invalid role.', 422);
         }
-        if (!empty($body['password']) && strlen((string)$body['password']) < 6) {
-            Response::error('Password must be at least 6 characters.', 422);
+        if (!empty($body['password'])) {
+            $pwErr = Auth::validatePassword((string)$body['password']);
+            if ($pwErr) {
+                Response::error($pwErr, 422);
+            }
         }
         $target = getUser($id);
         if (!$target) {
@@ -613,7 +621,11 @@ function route(string $method, string $path, array $body): void
                 'operating_hours_end' => Settings::get('operating_hours_end'),
             ]);
         }
-        Response::json(Settings::all());
+        $all = Settings::all();
+        if (!empty($all['email_smtp_pass']['value'])) {
+            $all['email_smtp_pass']['value'] = '********'; // masked; leave unchanged on save
+        }
+        Response::json($all);
     }
     if ($path === '/settings' && $method === 'PUT') {
         $user = Auth::requireUser();
@@ -636,11 +648,26 @@ function route(string $method, string $path, array $body): void
             'overlap_include_pending' => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
             'conflict_auto_action'    => [fn($v) => in_array((string)$v, ['reschedule', 'decline'], true), 'Competing-request action must be reschedule or decline.'],
             'reminder_hours_before'   => [fn($v) => $intIn($v, 0, 720),  'Reminder hours must be 0-720.'],
+            'email_enabled'           => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
+            'email_from'              => [fn($v) => is_string($v) && filter_var($v, FILTER_VALIDATE_EMAIL) !== false, 'From address must be a valid e-mail address.'],
+            'email_smtp_host'         => [fn($v) => is_string($v) && strlen($v) <= 255 && preg_match('/^[A-Za-z0-9.\-]*$/', $v) === 1, 'SMTP host may only contain letters, numbers, dots and dashes.'],
+            'email_smtp_port'         => [fn($v) => $intIn($v, 1, 65535), 'SMTP port must be 1-65535.'],
+            'email_smtp_user'         => [fn($v) => is_string($v) && strlen($v) <= 255, 'SMTP user is too long.'],
+            'email_smtp_pass'         => [fn($v) => is_string($v) && strlen($v) <= 255, 'SMTP password is too long.'],
+            'app_base_url'            => [fn($v) => is_string($v) && ($v === '' || preg_match('#^https?://[^\s]+$#', $v) === 1), 'Address must start with http:// or https://.'],
+            'manager_sla_days'        => [fn($v) => $intIn($v, 0, 60), 'Manager SLA must be 0-60 days (0 = off).'],
+            'max_revisions'           => [fn($v) => $intIn($v, 0, 10), 'Maximum revisions must be 0-10.'],
+            'auto_complete_enabled'   => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
+            'venue_hours_enabled'     => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
+            'recurring_max_count'     => [fn($v) => $intIn($v, 1, 104), 'Recurring limit must be 1-104.'],
         ];
         $clean = [];
         foreach ($in as $k => $v) {
             if (!isset($rules[$k])) {
                 continue; // ignore unknown keys
+            }
+            if ($k === 'email_smtp_pass' && $v === '********') {
+                continue; // masked placeholder sent back unchanged
             }
             if (!$rules[$k][0]($v)) {
                 Response::error($rules[$k][1], 422, ['errors' => [$k => $rules[$k][1]]]);
@@ -658,7 +685,11 @@ function route(string $method, string $path, array $body): void
         foreach ($clean as $k => $v) {
             Settings::set($k, $v, $user);
         }
-        ActivityLog::write($user['id'], $user['email'], 'settings.update', 'settings', null, $clean);
+        $logged = $clean;
+        if (isset($logged['email_smtp_pass'])) {
+            $logged['email_smtp_pass'] = '(changed)';
+        }
+        ActivityLog::write($user['id'], $user['email'], 'settings.update', 'settings', null, $logged);
         Response::json(Settings::all());
     }
 
@@ -690,8 +721,10 @@ function route(string $method, string $path, array $body): void
     }
     if (preg_match('#^/bookings/(\d+)/queue$#', $path, $m) && $method === 'GET') {
         $user = Auth::requireUser();
-        Permissions::require($user, 'booking.view_own');
-        Response::json(BookingService::queuePosition((int)$m[1]));
+        if (!Permissions::can($user, 'booking.view_own') && !Permissions::can($user, 'booking.view_all')) {
+            Permissions::require($user, 'booking.view_own');
+        }
+        Response::json(BookingService::queuePosition((int)$m[1], $user));
     }
     if (preg_match('#^/bookings/(\d+)/no-show$#', $path, $m) && $method === 'POST') {
         $user = Auth::requireUser();
@@ -763,9 +796,14 @@ function route(string $method, string $path, array $body): void
     // ---------- iCal export ----------
     if ($path === '/calendar/ical' && $method === 'GET') {
         $user = Auth::requireUser();
-        Permissions::require($user, 'booking.view_own');
-        $from = $_GET['from'] ?? date('Y-m-d');
-        $to = $_GET['to'] ?? date('Y-m-d', strtotime('+60 days'));
+        if (!Permissions::can($user, 'booking.view_own') && !Permissions::can($user, 'booking.view_all')) {
+            Permissions::require($user, 'booking.view_own');
+        }
+        $from = (string)($_GET['from'] ?? date('Y-m-d'));
+        $to = (string)($_GET['to'] ?? date('Y-m-d', strtotime('+60 days')));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) !== 1 || preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) !== 1) {
+            Response::error('from and to must be dates (YYYY-MM-DD).', 422);
+        }
         $pdo = Database::pdo();
         $sql = "SELECT b.BookingId, b.ReferenceCode, b.BookingDate, b.StartTime, b.EndTime, b.Purpose,
                        v.Name AS VenueName, v.Location
@@ -786,8 +824,9 @@ function route(string $method, string $path, array $body): void
             $dtStart = str_replace(['-', ':'], '', $r['BookingDate'] . 'T' . substr($r['StartTime'], 0, 8));
             $dtEnd   = str_replace(['-', ':'], '', $r['BookingDate'] . 'T' . substr($r['EndTime'], 0, 8));
             $uid = 'vb-' . $r['BookingId'] . '@venuebooking';
-            $summary = str_replace([",", ";", "\n"], ["\\,", "\\;", "\\n"], ($r['Purpose'] ?: 'Booking') . ' @ ' . $r['VenueName']);
-            $loc = str_replace([",", ";", "\n"], ["\\,", "\\;", "\\n"], $r['Location'] ?? $r['VenueName']);
+            $ics = static fn(string $t): string => str_replace(["\\", ",", ";", "\r\n", "\n", "\r"], ["\\\\", "\\,", "\\;", "\\n", "\\n", "\\n"], $t);
+            $summary = $ics(($r['Purpose'] ?: 'Booking') . ' @ ' . $r['VenueName']);
+            $loc = $ics((string)($r['Location'] ?? $r['VenueName']));
             $lines[] = "BEGIN:VEVENT";
             $lines[] = "UID:{$uid}";
             $lines[] = "DTSTART:{$dtStart}";

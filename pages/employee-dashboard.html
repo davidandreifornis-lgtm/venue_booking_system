@@ -59,7 +59,7 @@
     import { dataTable } from '../components/data-table.js';
     import { emptyState } from '../components/empty-state.js';
     import { statusBadge } from '../components/status-badge.js';
-    import { formatDate, formatTime } from '../js/utils.js';
+    import { formatDate, formatTime, escapeHtml } from '../js/utils.js';
 
     window.__pageInit = async function () {
       const recentEl = document.getElementById('recent-requests');
@@ -99,10 +99,10 @@
             <th>Venue</th><th>Date</th><th>Time</th><th>Purpose</th>
           </tr></thead><tbody>
             ${up.map((b) => `<tr class="clickable" onclick="location.href='booking-details.html?id=${encodeURIComponent(b.id)}'">
-              <td>${b.venueName || b.venue || '—'}</td>
+              <td>${escapeHtml(b.venueName || b.venue || '—')}</td>
               <td>${formatDate(b.date)}</td>
               <td>${formatTime(b.startTime)}</td>
-              <td>${b.purpose || '—'}</td>
+              <td>${escapeHtml(b.purpose || '—')}</td>
             </tr>`).join('')}
           </tbody></table></div>`;
         }

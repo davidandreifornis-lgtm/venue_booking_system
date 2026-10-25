@@ -56,11 +56,11 @@ BEGIN
   RETURN;
 END
 
-/* bcrypt: employee / manager / hr / admin (same as 02_seed.sql) */
-DECLARE @HEmp NVARCHAR(255) = N'$2y$10$dAI5c3W1dT85pZZ5EUvS.uG..bbTsz2D/hKPTEHMLI4aLChynVgui';
-DECLARE @HMgr NVARCHAR(255) = N'$2y$10$6DseVhqIJwwzaFWIuBhy6OA.evHJ9oleO5WaDflW/5yH5yknzLNEK';
-DECLARE @HHr  NVARCHAR(255) = N'$2y$10$aBGkU/tsl4tIqIyVCIZokOlWANWOgns1g/xo.bcGRYxo6G.JH9gBa';
-DECLARE @HAdm NVARCHAR(255) = N'$2y$10$VsbXStPxSQ8c/ILCv7ORbuKKcA0.6KEozEzNaQSeGWda39vG3YTdK';
+/* bcrypt: Emp@2026!x / Mgr@2026!x / Hr@2026!xx / Admin@2026! (same as 02_seed.sql) */
+DECLARE @HEmp NVARCHAR(255) = N'$2y$10$YjJ1/s9l9niYpE1cOCpMjOe4vVnPiJNJUX6ot8se9ip2sdy8bfNCy';
+DECLARE @HMgr NVARCHAR(255) = N'$2y$10$CwYOcPlMVBniVC9hgTOm1umWfEx2aPtKOyanriEYLz5ybtk5dR26S';
+DECLARE @HHr  NVARCHAR(255) = N'$2y$10$lVcfgbt4GW6nmCt9ZYFbpO7Y.lUJDba5zAsuR4QXXmMICkwx/dV.O';
+DECLARE @HAdm NVARCHAR(255) = N'$2y$10$F7gRImhVbTsCNEhEe8bFfOM4ZH4h0WGEZLoyAGxv5NfSXBDMjokFe';
 
 /* ---------- Core demo users (idempotent) ---------- */
 IF NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Email = N'admin')

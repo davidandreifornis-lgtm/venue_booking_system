@@ -94,8 +94,8 @@
 
       const r = role();
       const canManagerAct = r === 'Manager' && booking.status === 'Pending Manager Validation';
-      const canHrAct = r === 'HR' && ['Pending HR Decision', 'Manager Validated'].includes(booking.status);
       const isOwner = session()?.id === booking.requesterId;
+      const canHrAct = ['HR', 'Administrator'].includes(r) && ['Pending HR Decision', 'Manager Validated'].includes(booking.status);
       // The requester answers a reschedule proposal / edits a returned request from this same Actions panel.
       const ownerCanAct = isOwner && ['Reschedule Proposed', 'Revision Requested'].includes(booking.status);
       // HR/Admin can pull an already-confirmed booking in an emergency (never their own).
@@ -387,12 +387,23 @@
               </div>
               <label ${lb}>Reason (required)</label>
               <textarea id="ov-reason" rows="3" maxlength="500" ${fld}></textarea>
+              <label class="mt-4 flex items-start gap-2 text-sm">
+                <input type="checkbox" id="ov-take" class="mt-1" />
+                <span>Also book this time for me now<br><span class="text-xs text-muted">Confirmed immediately in the same step, so nobody can take the freed time in between. The reason above is kept on your booking.</span></span>
+              </label>
+              <div id="ov-take-fields" class="hidden mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="sm:col-span-2"><label ${lb}>What is it for?</label><input type="text" id="ov-purpose" maxlength="500" ${fld} /></div>
+                <div><label ${lb}>Attendees</label><input type="number" min="1" id="ov-attendees" value="1" ${fld} /></div>
+              </div>
               <p id="ov-err" class="text-xs text-clay mt-2 hidden"></p>
             `,
             footerHtml: `${btnCancel}<button type="button" id="ov-ok" class="px-3 py-1.5 text-sm bg-clay text-paper rounded-sm">Apply override</button>`,
           });
           document.querySelector('[data-cancel]')?.addEventListener('click', closeModal);
           const modeEl = document.getElementById('ov-mode');
+          document.getElementById('ov-take').addEventListener('change', (e) => {
+            document.getElementById('ov-take-fields').classList.toggle('hidden', !e.target.checked);
+          });
           modeEl.addEventListener('change', () => {
             document.getElementById('ov-when').classList.toggle('hidden', modeEl.value === 'cancel');
           });
@@ -406,16 +417,23 @@
             const startTime = document.getElementById('ov-start').value;
             const endTime = document.getElementById('ov-end').value;
             if (!reason) return fail('A reason is required.');
+            const takeOver = document.getElementById('ov-take').checked;
+            const purpose = document.getElementById('ov-purpose').value.trim();
+            const attendees = Math.max(1, parseInt(document.getElementById('ov-attendees').value, 10) || 1);
+            if (takeOver && !purpose) return fail('Say what the venue is needed for.');
             const given = [date, startTime, endTime].filter(Boolean).length;
             if (mode === 'reschedule' && given !== 0 && given !== 3) return fail('Fill in the date, start and end — or leave all three empty.');
             const btn = document.getElementById('ov-ok');
             btn.disabled = true;
             try {
-              await emergencyOverride(id, mode === 'cancel' ? { mode, reason } : { mode, reason, ...(given === 3 ? { date, startTime, endTime } : {}) });
+              const payload = mode === 'cancel' ? { mode, reason } : { mode, reason, ...(given === 3 ? { date, startTime, endTime } : {}) };
+              if (takeOver) Object.assign(payload, { takeOver: true, purpose, attendees });
+              const res = await emergencyOverride(id, payload);
               closeModal();
-              flash(mode === 'cancel'
+              flash((mode === 'cancel'
                 ? `${booking.ref} was cancelled. The requester has been notified.`
-                : `${booking.ref} was moved. The requester has been notified.`, 'success');
+                : `${booking.ref} was moved. The requester has been notified.`)
+                + (res?.takeOverBooking?.ref ? ` The time is now booked for you (${res.takeOverBooking.ref}).` : ''), 'success');
               location.reload();
             } catch (e) {
               btn.disabled = false;

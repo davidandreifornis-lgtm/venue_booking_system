@@ -26,6 +26,7 @@
             <a href="users.html" class="btn btn-outline btn-sm">Users</a>
             <a href="venues.html" class="btn btn-outline btn-sm">Venues</a>
             <a href="departments.html" class="btn btn-outline btn-sm">Departments</a>
+            <a href="reports.html" class="btn btn-outline btn-sm">Reports</a>
           </div>
         </div>
         <p style="margin:0;color:#6c757d;font-size:0.9rem">Manage system configuration and review activity.</p>
@@ -47,6 +48,7 @@
     import '../js/app.js';
     import { getUsers, getDepartments, getVenues, getBookings, getActivityLogs } from '../js/api.js';
     import { emptyState } from '../components/empty-state.js';
+    import { escapeHtml } from '../js/utils.js';
 
     async function safeCount(fn) {
       try {
@@ -72,10 +74,10 @@
             <th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th>
           </tr></thead><tbody>
             ${list.map((l) => `<tr>
-              <td>${l.timestamp || '—'}</td>
-              <td>${l.actor || '—'}</td>
-              <td>${l.action || '—'}</td>
-              <td>${l.target || '—'}</td>
+              <td>${escapeHtml(l.timestamp || '—')}</td>
+              <td>${escapeHtml(l.actor || '—')}</td>
+              <td>${escapeHtml(l.action || '—')}</td>
+              <td>${escapeHtml(l.target || '—')}</td>
             </tr>`).join('')}
           </tbody></table></div>`;
         }

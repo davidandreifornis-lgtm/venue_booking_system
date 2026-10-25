@@ -8,157 +8,150 @@
   <link rel="stylesheet" href="../assets/css/tokens.css" />
   <link rel="stylesheet" href="../assets/css/shell.css" />
   <link rel="stylesheet" href="../assets/css/components.css" />
+  <link rel="stylesheet" href="../assets/css/tokens.css" />
+  <link rel="stylesheet" href="../assets/css/shell.css" />
+  <link rel="stylesheet" href="../assets/css/components.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Inter+Tight:wght@400;500;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: {
-            display: ['Fraunces', 'Georgia', 'serif'],
-            sans: ['"Inter Tight"', 'system-ui', 'sans-serif'],
-          },
+          fontFamily: { display: ['Fraunces', 'Georgia', 'serif'], sans: ['"Inter Tight"', 'system-ui', 'sans-serif'] },
+          colors: { paper: '#faf8f5', ink: '#1a1815', muted: '#6b6560', rule: '#e8e4dd', accent: '#3d6b66', 'accent-soft': '#e6efee', clay: '#b5623f' },
+          borderRadius: { DEFAULT: '4px', sm: '2px' },
+          boxShadow: { card: '0 1px 0 rgba(0,0,0,0.03), 0 8px 24px -16px rgba(0,0,0,0.14)' },
         },
       },
     };
   </script>
+  <style>body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.03;background-image:url('../assets/noise.svg');background-repeat:repeat}</style>
 </head>
-<body class="bg-paper text-ink font-sans">
-  <div class="app-shell">
-    <aside id="sidebar" class="sidebar"></aside>
-    <div class="main-area">
-      <header id="header" class="top-header"></header>
-      <main class="page-content">
-        <div class="page-header">
-          <div>
-            <h1 class="page-title">Reports</h1>
-            <p class="page-sub">Utilization, peak hours and approval turnaround</p>
-          </div>
-          <div class="flex gap-2 items-end flex-wrap">
-            <label class="text-sm">From <input type="date" id="from" class="input" /></label>
-            <label class="text-sm">To <input type="date" id="to" class="input" /></label>
-            <button id="refresh" class="btn btn-primary">Refresh</button>
-            <a id="ical" class="btn btn-ghost" href="#">Download iCal</a>
-          </div>
-        </div>
+<body class="bg-paper text-ink font-sans antialiased" data-page-title="Reports">
+  <div id="app">
+    <div id="page-header"></div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div class="card p-4">
-            <div class="text-sm text-muted">Avg approval time</div>
-            <div id="turnaround" class="text-2xl font-display font-semibold mt-1">—</div>
-            <div id="turnaround-sample" class="text-xs text-muted mt-1"></div>
-          </div>
-          <div class="card p-4 md:col-span-2">
-            <div class="text-sm text-muted mb-2">Status mix</div>
-            <div id="status-mix" class="flex flex-wrap gap-2"></div>
-          </div>
-        </div>
+    <div class="flex flex-wrap items-end gap-3 mb-6">
+      <label class="text-[11px] uppercase tracking-[0.08em] text-muted">From
+        <input type="date" id="from" class="block mt-1 border border-rule rounded-sm px-3 py-2 text-sm bg-paper text-ink" /></label>
+      <label class="text-[11px] uppercase tracking-[0.08em] text-muted">To
+        <input type="date" id="to" class="block mt-1 border border-rule rounded-sm px-3 py-2 text-sm bg-paper text-ink" /></label>
+      <button type="button" id="refresh" class="px-4 py-2 text-sm bg-ink text-paper rounded-sm">Refresh</button>
+      <a id="ical" class="px-4 py-2 text-sm border border-rule rounded-sm hover:bg-rule/30" href="#">Download iCal</a>
+    </div>
+    <p id="report-error" class="text-sm text-clay mb-4 hidden"></p>
 
-        <div class="card p-4 mb-6">
-          <h2 class="font-display text-lg mb-3">Peak booking hours</h2>
-          <div id="peak-hours" class="flex items-end gap-1 h-40"></div>
-        </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="border border-rule rounded-sm bg-paper p-5">
+        <p class="text-[11px] uppercase tracking-[0.08em] text-muted">Average approval time</p>
+        <p id="turnaround" class="font-display text-3xl mt-1">—</p>
+        <p id="turnaround-sample" class="text-xs text-muted mt-1"></p>
+      </div>
+      <div class="border border-rule rounded-sm bg-paper p-5 md:col-span-2">
+        <p class="text-[11px] uppercase tracking-[0.08em] text-muted mb-2">Status mix</p>
+        <div id="status-mix" class="flex flex-wrap gap-2"></div>
+      </div>
+    </div>
 
-        <div class="card p-4">
-          <h2 class="font-display text-lg mb-3">Utilization by venue / department</h2>
-          <div class="table-wrap overflow-x-auto">
-            <table class="data-table w-full text-sm">
-              <thead>
-                <tr>
-                  <th>Venue</th>
-                  <th>Department</th>
-                  <th>Bookings</th>
-                  <th>Hours</th>
-                  <th>Avg attendees</th>
-                </tr>
-              </thead>
-              <tbody id="util-body"></tbody>
-            </table>
-          </div>
-        </div>
-      </main>
+    <div class="border border-rule rounded-sm bg-paper p-5 mb-6">
+      <h2 class="font-display text-lg mb-3">Peak booking hours</h2>
+      <div id="peak-hours" class="flex items-end gap-1 h-40"></div>
+    </div>
+
+    <div class="border border-rule rounded-sm bg-paper p-5">
+      <h2 class="font-display text-lg mb-3">Utilization by venue and department</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-[11px] uppercase tracking-[0.08em] text-muted border-b border-rule">
+              <th class="py-2 pr-4">Venue</th><th class="py-2 pr-4">Department</th>
+              <th class="py-2 pr-4">Bookings</th><th class="py-2 pr-4">Hours</th><th class="py-2">Avg attendees</th>
+            </tr>
+          </thead>
+          <tbody id="util-body"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
   <script type="module">
-    import { loadSession, isAuthed, role } from '../js/auth.js';
-    import { renderSidebar } from '../components/sidebar.js';
-    import { renderHeader } from '../components/header.js';
-    import { api } from '../js/api.js';
-    import { showToast } from '../components/toast.js';
+    import '../js/app.js';
+    import { role } from '../js/auth.js';
+    import { getReport } from '../js/api.js';
+    import { pageHeader } from '../js/ui.js';
+    import { escapeHtml } from '../js/utils.js';
 
-    await loadSession();
-    if (!isAuthed()) location.replace('login.html');
-    const r = role();
-    if (r !== 'HR' && r !== 'Administrator') {
-      location.replace('employee-dashboard.html');
-    }
+    window.__pageInit = async function () {
+      const r = role();
+      if (r !== 'HR' && r !== 'Administrator') {
+        location.replace('employee-dashboard.html');
+        return;
+      }
+      document.getElementById('page-header').innerHTML = pageHeader({
+        description: 'Utilization, peak hours and approval turnaround for approved and completed bookings.',
+      });
 
-    renderSidebar(document.getElementById('sidebar'));
-    renderHeader(document.getElementById('header'), { title: 'Reports' });
+      const fromEl = document.getElementById('from');
+      const toEl = document.getElementById('to');
+      const err = document.getElementById('report-error');
+      // Local dates (toISOString would give the UTC date, which is "yesterday" early in the morning here).
+      const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const now = new Date();
+      fromEl.value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+      toEl.value = ymd(now);
 
-    const fromEl = document.getElementById('from');
-    const toEl = document.getElementById('to');
-    const now = new Date();
-    fromEl.value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    toEl.value = now.toISOString().slice(0, 10);
+      async function load() {
+        err.classList.add('hidden');
+        const params = { from: fromEl.value, to: toEl.value };
+        try {
+          const [util, peak, turn, status] = await Promise.all([
+            getReport('utilization', params),
+            getReport('peak-hours', params),
+            getReport('turnaround', params),
+            getReport('status-summary', params),
+          ]);
 
-    function qs() {
-      return `from=${encodeURIComponent(fromEl.value)}&to=${encodeURIComponent(toEl.value)}`;
-    }
+          document.getElementById('turnaround').textContent = turn.avgHours != null ? `${turn.avgHours} h` : '—';
+          document.getElementById('turnaround-sample').textContent =
+            turn.sampleSize ? `Based on ${turn.sampleSize} booking${turn.sampleSize === 1 ? '' : 's'}` : 'No decisions in this range';
 
-    async function load() {
-      try {
-        const [util, peak, turn, status] = await Promise.all([
-          api.get(`/reports/utilization?${qs()}`),
-          api.get(`/reports/peak-hours?${qs()}`),
-          api.get(`/reports/turnaround?${qs()}`),
-          api.get(`/reports/status-summary?${qs()}`),
-        ]);
+          document.getElementById('status-mix').innerHTML = (status.statuses || []).map((s) =>
+            `<span class="text-xs border border-rule rounded-sm px-2 py-1">${escapeHtml(s.status)}: <strong>${escapeHtml(String(s.count))}</strong></span>`
+          ).join('') || '<span class="text-sm text-muted">No bookings in this range</span>';
 
-        document.getElementById('turnaround').textContent =
-          turn.avgHours != null ? `${turn.avgHours} h` : '—';
-        document.getElementById('turnaround-sample').textContent =
-          turn.sampleSize ? `Based on ${turn.sampleSize} bookings` : 'No data in range';
-
-        const mix = document.getElementById('status-mix');
-        mix.innerHTML = (status.statuses || []).map(s =>
-          `<span class="badge">${s.status}: ${s.count}</span>`
-        ).join('') || '<span class="text-muted text-sm">No bookings</span>';
-
-        const max = Math.max(1, ...peak.hours.map(h => h.count));
-        document.getElementById('peak-hours').innerHTML = peak.hours
-          .filter(h => h.hour >= 6 && h.hour <= 20)
-          .map(h => {
+          const hours = (peak.hours || []).filter((h) => h.hour >= 6 && h.hour <= 20);
+          const max = Math.max(1, ...hours.map((h) => h.count));
+          document.getElementById('peak-hours').innerHTML = hours.map((h) => {
             const pct = Math.round((h.count / max) * 100);
-            return `<div class="flex-1 flex flex-col items-center gap-1" title="${h.label}: ${h.count}">
-              <div class="w-full bg-rule rounded-t" style="height:${Math.max(4, pct)}%"></div>
+            return `<div class="flex-1 flex flex-col items-center justify-end gap-1 h-full" title="${escapeHtml(h.label)}: ${h.count}">
+              <span class="text-[10px] text-muted">${h.count || ''}</span>
+              <div class="w-full bg-accent/60 rounded-t-sm" style="height:${Math.max(3, pct * 0.8)}%"></div>
               <span class="text-[10px] text-muted">${h.hour}</span>
             </div>`;
           }).join('');
 
-        const tbody = document.getElementById('util-body');
-        tbody.innerHTML = (util.rows || []).map(row => `
-          <tr>
-            <td>${row.venueName || '—'}</td>
-            <td>${row.departmentName || '—'}</td>
-            <td>${row.bookingCount}</td>
-            <td>${row.totalHours}</td>
-            <td>${row.avgAttendees}</td>
-          </tr>
-        `).join('') || '<tr><td colspan="5" class="text-muted">No data in range</td></tr>';
+          document.getElementById('util-body').innerHTML = (util.rows || []).map((row) => `
+            <tr class="border-b border-rule">
+              <td class="py-2 pr-4">${escapeHtml(row.venueName || '—')}</td>
+              <td class="py-2 pr-4">${escapeHtml(row.departmentName || '—')}</td>
+              <td class="py-2 pr-4">${escapeHtml(String(row.bookingCount))}</td>
+              <td class="py-2 pr-4">${escapeHtml(String(row.totalHours))}</td>
+              <td class="py-2">${escapeHtml(String(row.avgAttendees))}</td>
+            </tr>`).join('') || '<tr><td colspan="5" class="py-3 text-muted">No data in this range</td></tr>';
 
-        document.getElementById('ical').href =
-          `../backend/api/index.php?r=/calendar/ical&from=${fromEl.value}&to=${toEl.value}`;
-      } catch (err) {
-        showToast(err.message || 'Failed to load reports', 'error');
+          document.getElementById('ical').href =
+            `/venue_booking_system/backend/api/index.php?r=${encodeURIComponent('/calendar/ical')}&from=${fromEl.value}&to=${toEl.value}`;
+        } catch (e) {
+          err.textContent = e.message || 'Failed to load reports.';
+          err.classList.remove('hidden');
+        }
       }
-    }
 
-    document.getElementById('refresh').addEventListener('click', load);
-    load();
+      document.getElementById('refresh').addEventListener('click', load);
+      await load();
+    };
   </script>
 </body>
 </html>

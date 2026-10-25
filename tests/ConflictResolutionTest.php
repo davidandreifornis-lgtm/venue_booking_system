@@ -191,14 +191,19 @@ final class ConflictResolutionTest extends VbsTestCase
         // Before the override HR cannot take the slot.
         $this->assertRejected(fn() => BookingService::create($hr, $this->payload($v, $date, '10:00', '11:00')), [409, 422]);
 
-        BookingService::emergencyOverride($hr, $a, ['mode' => 'cancel', 'reason' => 'Fire drill debrief needs the hall']);
+        $res = BookingService::emergencyOverride($hr, $a, [
+            'mode' => 'cancel', 'reason' => 'Fire drill debrief needs the hall',
+            'takeOver' => true, 'purpose' => 'Fire drill debrief', 'attendees' => 4,
+        ]);
 
         $row = $this->row($a);
         $this->assertSame('Cancelled', $row['Status']);
         $this->assertStringContainsString('Emergency', (string)$row['CancelReason']);
 
-        $new = BookingService::create($hr, $this->payload($v, $date, '10:00', '11:00'));
-        $this->assertSame('Approved', $new['status']);
+        // HR's own booking is confirmed in the same step (it would otherwise wait for another approver while the
+        // freed slot - pending requests do not hold it - could be taken by someone else).
+        $this->assertSame('Approved', $res['takeOverBooking']['status']);
+        $this->assertSame(1, $this->countApprovedOverlap($v, $date, '10:00', '11:00'));
     }
 
     public function test_emergency_reschedule_moves_the_booking_at_once(): void
@@ -258,6 +263,50 @@ final class ConflictResolutionTest extends VbsTestCase
         $this->assertRejected(fn() => BookingService::emergencyOverride($hr, $hrOwn, ['mode' => 'cancel', 'reason' => 'x']), [403]);
         $this->assertSame('Approved', $this->statusOf($approved));
         $this->assertSame('Pending HR Decision', $this->statusOf($pending));
+    }
+
+    // ------------------------------------------------------------------ HR / Admin bookings need no approver
+
+    public function test_hr_booking_is_confirmed_at_once_and_handles_pending_requests_for_the_same_time(): void
+    {
+        $d = $this->mkDept('CR Dept 12');
+        $ana = $this->mkUser('Employee', 'cr12.ana', $d);
+        $hr = $this->mkUser('HR', 'cr12.hr');
+        $v = $this->mkVenue('CR Hall 12');
+        $date = $this->date();
+
+        $pending = $this->pendingHr($v, $ana['id'], $date, '10:00', '11:00', '2030-01-01 08:00:00', $d);
+
+        $mine = BookingService::create($hr, $this->payload($v, $date, '10:00', '11:00'));
+
+        $this->assertSame('Approved', $mine['status'], 'HR bookings need no approver.');
+        $this->assertNotSame('Pending HR Decision', $this->statusOf($pending), 'The overlapping request must not be left waiting.');
+        $this->assertContains($this->statusOf($pending), ['Reschedule Proposed', 'Declined']);
+    }
+
+    public function test_admin_booking_is_confirmed_at_once(): void
+    {
+        $admin = $this->mkUser('Administrator', 'cr13.admin');
+        $v = $this->mkVenue('CR Hall 13');
+        $b = BookingService::create($admin, $this->payload($v, $this->date(), '09:00', '10:00'));
+        $this->assertSame('Approved', $b['status']);
+    }
+
+    public function test_hr_cannot_book_over_a_confirmed_booking_without_an_override(): void
+    {
+        $d = $this->mkDept('CR Dept 14');
+        $ana = $this->mkUser('Employee', 'cr14.ana', $d);
+        $hr = $this->mkUser('HR', 'cr14.hr');
+        $v = $this->mkVenue('CR Hall 14');
+        $date = $this->date();
+        $a = $this->insertBooking($v, $ana['id'], $date, '10:00', '11:00', 'Approved', $d);
+
+        $this->assertRejected(fn() => BookingService::create($hr, $this->payload($v, $date, '10:00', '11:00')), [409, 422]);
+
+        // After an emergency override (without take-over) HR can book the freed time normally.
+        BookingService::emergencyOverride($hr, $a, ['mode' => 'cancel', 'reason' => 'Urgent use']);
+        $new = BookingService::create($hr, $this->payload($v, $date, '10:00', '11:00'));
+        $this->assertSame('Approved', $new['status']);
     }
 
     public function test_decision_by_two_people_cannot_both_apply(): void

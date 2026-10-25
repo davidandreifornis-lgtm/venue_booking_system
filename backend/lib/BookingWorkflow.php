@@ -35,10 +35,10 @@ class BookingWorkflow
             'Cancelled',
         ],
         'Reschedule Proposed' => [
-            'Approved',
+            'Approved',          // requester accepts (or keeps an approved booking)
             'Declined',
-            'Pending HR Decision', // keep original, return to queue
-            'Approved', // accept
+            'Pending HR Decision', // requester keeps original, back to the HR queue
+            'Rescheduled',       // emergency override moves it immediately
             'Cancelled',
         ],
         'Approved' => [

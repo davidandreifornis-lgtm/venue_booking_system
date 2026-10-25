@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Settings.php';
 require_once __DIR__ . '/BookingService.php';
+require_once __DIR__ . '/Response.php';
 
 /**
  * Generates additional booking instances for a simple weekly recurrence.
@@ -19,7 +20,7 @@ class RecurrenceService
         $max = Settings::int('recurring_max_count', 52);
         $parsed = self::parseRule($rule);
         if (!$parsed || $parsed['freq'] !== 'WEEKLY') {
-            return ['created' => 0, 'ids' => [], 'message' => 'Only FREQ=WEEKLY is supported'];
+            return ['created' => 0, 'ids' => [], 'skipped' => [], 'message' => 'Only FREQ=WEEKLY is supported'];
         }
 
         $pdo = Database::pdo();
@@ -27,7 +28,14 @@ class RecurrenceService
         $stmt->execute([$parentBookingId]);
         $parent = $stmt->fetch();
         if (!$parent) {
-            return ['created' => 0, 'ids' => [], 'message' => 'Parent not found'];
+            return ['created' => 0, 'ids' => [], 'skipped' => [], 'message' => 'Parent not found'];
+        }
+        // Only the person who made the booking may repeat it (the copies are created in their name).
+        if ((int)$parent['RequesterUserId'] !== (int)$user['id']) {
+            Response::error('Only the requester can repeat this booking.', 403);
+        }
+        if (!empty($parent['IsRecurrenceInstance'])) {
+            return ['created' => 0, 'ids' => [], 'skipped' => [], 'message' => 'This booking is already part of a series.'];
         }
 
         // Mark parent
@@ -39,10 +47,12 @@ class RecurrenceService
             // columns may not exist yet
         }
 
-        $byday = $parsed['byday'] ?: [self::phpDowToCode((int)date('w', strtotime($parent['BookingDate'])))];
+        $parentDate = substr((string)($parent['BookingDate'] instanceof DateTimeInterface ? $parent['BookingDate']->format('Y-m-d') : $parent['BookingDate']), 0, 10);
+        $byday = $parsed['byday'] ?: [self::phpDowToCode((int)date('w', strtotime($parentDate)))];
         $count = min($parsed['count'] ?: 8, $max);
         $created = [];
-        $date = new DateTimeImmutable($parent['BookingDate']);
+        $skipped = [];
+        $date = new DateTimeImmutable($parentDate);
         $instances = 1; // parent counts as 1
 
         for ($i = 0; $i < 400 && $instances < $count; $i++) {
@@ -55,15 +65,22 @@ class RecurrenceService
             $payload = [
                 'venueId' => (int)$parent['VenueId'],
                 'date' => $date->format('Y-m-d'),
-                'startTime' => substr($parent['StartTime'], 0, 5),
-                'endTime' => substr($parent['EndTime'], 0, 5),
+                'startTime' => substr((string)$parent['StartTime'], 0, 5),
+                'endTime' => substr((string)$parent['EndTime'], 0, 5),
                 'purpose' => $parent['Purpose'],
                 'attendees' => (int)$parent['Attendees'],
                 'departmentId' => $parent['DepartmentId'] !== null ? (int)$parent['DepartmentId'] : null,
                 'requirements' => [], // keep simple; equipment not auto-copied
             ];
+
+            // create() reports problems with Response::error(), which ENDS the request in production, so a try/catch
+            // cannot skip a bad week. Check the rules first and only create weeks that will be accepted.
+            $problems = BookingService::validatePayload($payload, null, $user);
+            if ($problems) {
+                $skipped[] = ['date' => $payload['date'], 'reason' => (string)reset($problems)];
+                continue;
+            }
             try {
-                // Use internal insert path by calling create — may go through approval again
                 $row = BookingService::create($user, $payload);
                 $newId = $row['id'] ?? null;
                 if ($newId) {
@@ -76,13 +93,12 @@ class RecurrenceService
                     }
                     $created[] = $newId;
                 }
-            } catch (Throwable $e) {
-                // skip conflicts / validation failures for that day
-                continue;
+            } catch (ApiResponse $e) {
+                $skipped[] = ['date' => $payload['date'], 'reason' => $e->getMessage()];
             }
         }
 
-        return ['created' => count($created), 'ids' => $created, 'message' => null];
+        return ['created' => count($created), 'ids' => $created, 'skipped' => $skipped, 'message' => null];
     }
 
     private static function parseRule(string $rule): ?array
