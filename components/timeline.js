@@ -1,29 +1,55 @@
 /**
- * Booking request vertical timeline.
+ * Booking request vertical timeline + full status history audit trail.
  */
 
 import { formatDateTime, escapeHtml } from '../js/utils.js';
 
-const STAGES = [
-  { key: 'submitted', label: 'Request Submitted' },
-  { key: 'manager_validation', label: 'Manager Validation' },
-  { key: 'manager_validated', label: 'Manager Validated' },
-  { key: 'hr_review', label: 'HR Review' },
-  { key: 'final', label: 'Final Decision' },
-];
-
 /**
  * Build timeline from a booking record.
- * Completed stages show status, timestamp, actor, notes.
- * Future stages are greyed with outlined dots.
+ * Prefer booking.statusHistory (server audit log) when present.
  */
 export function timeline(booking) {
   if (!booking) return '';
 
+  const history = Array.isArray(booking.statusHistory) ? booking.statusHistory : [];
+  if (history.length) {
+    return renderFromHistory(booking, history);
+  }
+  return renderFromStatus(booking);
+}
+
+function renderFromHistory(booking, history) {
+  const items = history.map((h, i) => {
+    const label = h.toStatus || 'Update';
+    const actor = h.isSystem
+      ? 'System'
+      : (h.changedByName || h.changedByEmail || 'User');
+    const notes = h.reason || null;
+    const tone = toneForStatus(h.toStatus);
+    return eventHtml({
+      label,
+      done: true,
+      timestamp: h.changedAt,
+      actor,
+      notes,
+      tone,
+      fromStatus: h.fromStatus,
+      isLast: i === history.length - 1,
+    });
+  });
+
+  return `
+    <div class="timeline" role="list" aria-label="Booking history">
+      ${items.join('')}
+    </div>
+    <p class="text-xs text-muted mt-3">Every status change is recorded with actor and reason for audit.</p>
+  `;
+}
+
+function renderFromStatus(booking) {
   const status = booking.status || '';
   const events = [];
 
-  // Submitted
   events.push({
     label: 'Request Submitted',
     done: true,
@@ -33,16 +59,18 @@ export function timeline(booking) {
     tone: 'accent',
   });
 
-  // Manager path
-  if (['Manager Validated', 'Pending HR Decision', 'Approved', 'Declined', 'Rescheduled'].includes(status)) {
-    events.push({
-      label: 'Manager Validated',
-      done: true,
-      timestamp: booking.managerValidatedAt,
-      actor: booking.managerName || booking.departmentManager,
-      notes: booking.managerNotes,
-      tone: 'accent',
-    });
+  if (['Manager Validated', 'Pending HR Decision', 'Approved', 'Declined', 'Rescheduled', 'Expired', 'Cancelled'].includes(status)
+      && status !== 'Pending Manager Validation' && status !== 'Rejected by Manager') {
+    if (booking.managerValidatedAt || booking.validatedAt) {
+      events.push({
+        label: 'Manager Validated',
+        done: true,
+        timestamp: booking.managerValidatedAt || booking.validatedAt,
+        actor: booking.managerName || booking.departmentManager,
+        notes: booking.managerNotes,
+        tone: 'accent',
+      });
+    }
   } else if (status === 'Pending Manager Validation') {
     events.push({
       label: 'Manager Validation',
@@ -52,9 +80,17 @@ export function timeline(booking) {
       notes: null,
       tone: null,
     });
+  } else if (status === 'Rejected by Manager') {
+    events.push({
+      label: 'Rejected by Manager',
+      done: true,
+      timestamp: booking.updatedAt,
+      actor: booking.managerName,
+      notes: booking.managerNotes || booking.declineReason,
+      tone: 'clay',
+    });
   }
 
-  // HR / final
   if (status === 'Approved') {
     events.push({
       label: 'Approved',
@@ -70,7 +106,7 @@ export function timeline(booking) {
       done: true,
       timestamp: booking.hrDecidedAt || booking.updatedAt,
       actor: booking.hrName,
-      notes: booking.hrNotes,
+      notes: booking.hrNotes || booking.declineReason,
       tone: 'clay',
     });
   } else if (status === 'Rescheduled') {
@@ -82,6 +118,24 @@ export function timeline(booking) {
       notes: booking.hrNotes,
       tone: 'clay',
     });
+  } else if (status === 'Expired') {
+    events.push({
+      label: 'Expired',
+      done: true,
+      timestamp: booking.updatedAt,
+      actor: 'System',
+      notes: 'Event date passed while still undecided',
+      tone: 'clay',
+    });
+  } else if (status === 'Cancelled') {
+    events.push({
+      label: 'Cancelled',
+      done: true,
+      timestamp: booking.updatedAt,
+      actor: null,
+      notes: booking.cancelReason,
+      tone: 'clay',
+    });
   } else if (['Pending HR Decision', 'Manager Validated'].includes(status)) {
     events.push({
       label: 'HR Review',
@@ -91,49 +145,55 @@ export function timeline(booking) {
       notes: null,
       tone: null,
     });
-  } else if (status === 'Cancelled') {
+  } else if (status === 'Revision Requested') {
     events.push({
-      label: 'Cancelled',
+      label: 'Revision Requested',
       done: true,
       timestamp: booking.updatedAt,
       actor: null,
-      notes: booking.hrNotes || booking.managerNotes,
-      tone: 'muted',
+      notes: booking.managerNotes || booking.hrNotes,
+      tone: 'clay',
     });
   }
 
-  // Ensure at least submitted + one pending if nothing else
-  if (events.length === 1 && status === 'Pending Manager Validation') {
-    // already has pending manager
-  }
+  return `
+    <div class="timeline" role="list" aria-label="Booking progress">
+      ${events.map((e, i) => eventHtml({ ...e, isLast: i === events.length - 1 })).join('')}
+    </div>
+  `;
+}
 
-  const items = events
-    .map((ev, i) => {
-      const isLast = i === events.length - 1;
-      const dot =
-        ev.done
-          ? ev.tone === 'clay'
-            ? 'bg-clay border-clay'
-            : ev.tone === 'muted'
-              ? 'bg-muted border-muted'
-              : 'bg-accent border-accent'
-          : 'bg-paper border-rule';
-      const line = isLast ? '' : `<div class="absolute left-[7px] top-5 bottom-0 w-px ${ev.done ? 'bg-accent/40' : 'bg-rule'}"></div>`;
+function toneForStatus(status) {
+  if (!status) return 'accent';
+  if (['Approved', 'Completed', 'Manager Validated', 'Pending HR Decision'].includes(status)) return 'accent';
+  if (['Declined', 'Rejected by Manager', 'Cancelled', 'Expired', 'No-Show'].includes(status)) return 'clay';
+  return 'accent';
+}
 
-      return `
-        <div class="relative pl-8 pb-8 last:pb-0">
-          ${line}
-          <div class="absolute left-0 top-1 w-[15px] h-[15px] rounded-full border-2 ${dot}"></div>
-          <div class="${ev.done ? '' : 'opacity-50'}">
-            <p class="text-sm font-medium text-ink tracking-tight">${escapeHtml(ev.label)}</p>
-            ${ev.timestamp ? `<p class="mt-0.5 text-xs text-muted">${escapeHtml(formatDateTime(ev.timestamp))}</p>` : ''}
-            ${ev.actor ? `<p class="mt-0.5 text-xs text-muted">${escapeHtml(ev.actor)}</p>` : ''}
-            ${ev.notes ? `<p class="mt-2 text-sm text-ink/80 leading-relaxed border-l-2 border-rule pl-3">${escapeHtml(ev.notes)}</p>` : ''}
-          </div>
+function eventHtml({ label, done, timestamp, actor, notes, tone, fromStatus, isLast }) {
+  const dotCls = done
+    ? (tone === 'clay' ? 'bg-clay border-clay' : 'bg-accent border-accent')
+    : 'bg-paper border-rule';
+  const line = isLast ? '' : '<span class="timeline-line" aria-hidden="true"></span>';
+  const when = timestamp ? formatDateTime(timestamp) : (done ? '—' : 'Waiting');
+  const who = actor ? escapeHtml(actor) : (done ? '—' : '—');
+  const from = fromStatus
+    ? `<span class="text-muted">from ${escapeHtml(fromStatus)}</span> → `
+    : '';
+  return `
+    <div class="timeline-item" role="listitem">
+      <div class="timeline-rail">
+        <span class="timeline-dot border-2 ${dotCls}"></span>
+        ${line}
+      </div>
+      <div class="timeline-body ${done ? '' : 'opacity-60'}">
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span class="font-medium text-sm">${from}<span class="${done ? 'text-ink' : 'text-muted'}">${escapeHtml(label)}</span></span>
+          <span class="text-[11px] text-muted">${escapeHtml(when)}</span>
         </div>
-      `;
-    })
-    .join('');
-
-  return `<div class="timeline">${items}</div>`;
+        <div class="text-xs text-muted mt-0.5">${who !== '—' ? `By ${who}` : ''}</div>
+        ${notes ? `<p class="mt-1 text-sm text-ink/90 border-l-2 border-rule pl-2">${escapeHtml(notes)}</p>` : ''}
+      </div>
+    </div>
+  `;
 }

@@ -45,3 +45,22 @@ New / updated settings:
 
 ### Status flow additions
 `Expired` is a terminal status reachable from any waiting state when the event date has passed or a deadline elapses.
+
+---
+
+## Later updates (capacity, expired UI, history)
+
+### Expired visible to HR & Admin
+- **HR Dashboard**: “Expired” stat card + dedicated table of expired bookings.
+- **Admin Dashboard**: “Expired” stat + list; link to All Bookings.
+- **All Bookings**: filter chips include Expired, Cancelled, Completed, Revision, Rejected, No-Show, etc.
+
+### Venue capacity enforcement
+- Backend rejects create/resubmit when attendees > venue.Capacity with a clear message.
+- Booking form: shows capacity under Attendees, sets `max`, live error if over limit, blocks submit client-side as well.
+
+### Booking history / audit trail
+- Every status change writes to `BookingStatusHistory` with a non-empty Reason (user note or system text).
+- `GET /api/bookings/{id}` includes `statusHistory[]` (from/to, actor, reason, timestamp).
+- `GET /api/bookings/{id}/history` returns the same list.
+- Details page timeline prefers the audit log so escalations, expiries, and auto-cancels are visible for investigations.

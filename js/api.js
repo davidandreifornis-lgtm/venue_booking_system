@@ -37,12 +37,18 @@ async function request(method, path, body = null) {
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let errors = null;
+    let payload = null;
     try {
       const data = await res.json();
+      payload = data;
       if (data && data.message) message = data.message;
+      if (data && data.errors && typeof data.errors === 'object') errors = data.errors;
     } catch (_) {}
     const e = new Error(message);
     e.status = res.status;
+    e.errors = errors;
+    e.payload = payload;
     throw e;
   }
 

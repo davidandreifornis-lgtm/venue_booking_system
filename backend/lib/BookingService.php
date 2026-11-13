@@ -198,7 +198,42 @@ class BookingService
         }
         $m = self::mapRow($row);
         $m['requirements'] = RequirementOptions::forBooking($id);
+        $m['statusHistory'] = self::getStatusHistory($id);
         return $m;
+    }
+
+    /**
+     * Full audit trail for a booking: every status change with actor and reason.
+     * Used on the details page and for investigations.
+     */
+    public static function getStatusHistory(int $bookingId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare(
+            "SELECT h.HistoryId, h.BookingId, h.FromStatus, h.ToStatus, h.Reason, h.ChangedAt,
+                    h.ChangedByUserId, u.FullName AS ChangedByName, u.Email AS ChangedByEmail
+             FROM dbo.BookingStatusHistory h
+             LEFT JOIN dbo.Users u ON u.UserId = h.ChangedByUserId
+             WHERE h.BookingId = ?
+             ORDER BY h.ChangedAt ASC, h.HistoryId ASC"
+        );
+        $stmt->execute([$bookingId]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $out[] = [
+                'id' => (int)$r['HistoryId'],
+                'bookingId' => (int)$r['BookingId'],
+                'fromStatus' => $r['FromStatus'],
+                'toStatus' => $r['ToStatus'],
+                'reason' => $r['Reason'],
+                'changedAt' => self::fmtStamp($r['ChangedAt'] ?? null),
+                'changedByUserId' => $r['ChangedByUserId'] !== null ? (int)$r['ChangedByUserId'] : null,
+                'changedByName' => $r['ChangedByName'] ?: ($r['ChangedByUserId'] ? null : 'System'),
+                'changedByEmail' => $r['ChangedByEmail'] ?? null,
+                'isSystem' => $r['ChangedByUserId'] === null,
+            ];
+        }
+        return $out;
     }
 
     /** Mark past approved bookings as Completed. */
@@ -425,7 +460,9 @@ class BookingService
         } elseif ($venue['Status'] !== 'Available') {
             $errors['venueId'] = 'Venue is not available for booking.';
         } elseif (isset($payload['attendees']) && (int)$payload['attendees'] > (int)$venue['Capacity']) {
-            $errors['attendees'] = 'Attendees exceed venue capacity (' . $venue['Capacity'] . ').';
+            $cap = (int)$venue['Capacity'];
+            $want = (int)$payload['attendees'];
+            $errors['attendees'] = "Cannot proceed: {$want} attendees exceed this venue's capacity limit of {$cap}. Choose a larger venue or reduce the attendee count.";
         }
 
         if (!$errors) {
@@ -1686,8 +1723,22 @@ $conflict = self::findConflict(
         return strlen($s) > $max ? substr($s, 0, $max - 1) . '...' : $s;
     }
 
+    /**
+     * Append an audit row. Always store a clear reason so investigators can reconstruct the process.
+     * $by = null means system/automated action.
+     */
     private static function history(PDO $pdo, int $bookingId, ?string $from, string $to, ?int $by, ?string $reason): void
     {
+        $reason = $reason !== null && $reason !== '' ? self::clip((string)$reason, 1000) : null;
+        if ($reason === null) {
+            if ($from === null) {
+                $reason = "Created with status \"{$to}\"";
+            } elseif ($by === null) {
+                $reason = "System transition from \"{$from}\" to \"{$to}\"";
+            } else {
+                $reason = "Status changed from \"{$from}\" to \"{$to}\"";
+            }
+        }
         $pdo->prepare(
             "INSERT INTO dbo.BookingStatusHistory (BookingId, FromStatus, ToStatus, ChangedByUserId, Reason)
              VALUES (?, ?, ?, ?, ?)"

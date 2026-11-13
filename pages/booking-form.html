@@ -89,13 +89,19 @@
         </div>
       </div>
 
-      <div id="conflict-alert" class="hidden mt-5 border border-clay/40 bg-clay/5 text-ink text-sm px-4 py-3 rounded flex items-start gap-2">
+      <div id="conflict-alert" class="hidden mt-5 border border-clay/40 bg-clay/5 text-ink text-sm px-4 py-3 rounded flex items-start gap-2" role="alert" aria-live="assertive">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="text-clay shrink-0 mt-0.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
-        <span id="conflict-text">This venue is already booked during the selected time.</span>
+        <div class="min-w-0 flex-1">
+          <p class="font-medium text-clay" id="conflict-title">Unable to submit this request</p>
+          <p id="conflict-text" class="mt-0.5">Please fix the problems listed below and try again.</p>
+          <ul id="conflict-list" class="mt-2 list-disc pl-4 space-y-0.5 text-sm"></ul>
+        </div>
       </div>
 
       <div class="flex items-center gap-3 mt-8 pt-6 border-t border-rule">
-        <button type="submit" id="submit-btn" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 disabled:opacity-50">Submit request</button>
+        <button type="submit" id="submit-btn" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-paper bg-ink hover:bg-ink/90 transition-colors duration-150 disabled:opacity-50">
+          <span id="submit-btn-label">Submit request</span>
+        </button>
         <a href="my-requests.html" class="inline-flex items-center justify-center rounded px-4 py-2.5 text-sm font-medium text-muted hover:text-ink hover:bg-rule/40 transition-colors duration-150">Cancel</a>
       </div>
     </form>
@@ -137,16 +143,66 @@
       const venueSel = document.getElementById('venueId');
       const mgrSel = document.getElementById('departmentManagerId');
 
+      const venueCapacityById = new Map();
       try {
         const venues = await getVenues({ status: 'Available' });
         const vlist = Array.isArray(venues) ? venues : venues?.items || [];
         vlist.forEach((v) => {
           const opt = document.createElement('option');
           opt.value = v.id;
-          opt.textContent = `${v.name}${v.capacity ? ` (cap. ${v.capacity})` : ''}`;
+          const cap = v.capacity != null ? Number(v.capacity) : null;
+          if (cap != null && Number.isFinite(cap)) venueCapacityById.set(String(v.id), cap);
+          opt.textContent = `${v.name}${cap != null ? ` (cap. ${cap})` : ''}`;
+          if (cap != null) opt.dataset.capacity = String(cap);
           venueSel.appendChild(opt);
         });
       } catch {}
+
+      const attendeesInput = document.getElementById('attendees');
+      const capacityHint = document.createElement('p');
+      capacityHint.id = 'capacity-hint';
+      capacityHint.className = 'mt-1 text-xs text-muted';
+      attendeesInput?.parentElement?.appendChild(capacityHint);
+
+      function applyVenueCapacity() {
+        const cap = venueCapacityById.get(String(venueSel.value));
+        if (attendeesInput) {
+          if (cap != null) {
+            attendeesInput.max = String(cap);
+            capacityHint.textContent = `This venue holds up to ${cap} people. Bookings above that limit cannot be submitted.`;
+            capacityHint.classList.remove('text-clay');
+            capacityHint.classList.add('text-muted');
+          } else {
+            attendeesInput.removeAttribute('max');
+            capacityHint.textContent = '';
+          }
+        }
+      }
+      function checkCapacityLive() {
+        const cap = venueCapacityById.get(String(venueSel.value));
+        const n = Number(attendeesInput?.value);
+        const errEl = document.querySelector('.field-error[data-for="attendees"]');
+        if (cap != null && Number.isFinite(n) && n > cap) {
+          if (errEl) {
+            errEl.textContent = `Cannot proceed: ${n} attendees exceed this venue's capacity limit of ${cap}. Choose a larger venue or reduce the attendee count.`;
+            errEl.classList.remove('hidden');
+          }
+          capacityHint.classList.add('text-clay');
+          return false;
+        }
+        if (errEl && errEl.textContent.includes('capacity')) {
+          errEl.classList.add('hidden');
+          errEl.textContent = '';
+        }
+        capacityHint.classList.remove('text-clay');
+        return true;
+      }
+      venueSel.addEventListener('change', () => {
+        applyVenueCapacity();
+        checkCapacityLive();
+      });
+      attendeesInput?.addEventListener('input', checkCapacityLive);
+      applyVenueCapacity();
 
       try {
         const users = await getUsers({ role: 'Manager' });
@@ -273,12 +329,55 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
 
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
+      const conflictTitle = document.getElementById('conflict-title');
+      const conflictList = document.getElementById('conflict-list');
+      const submitBtnLabel = document.getElementById('submit-btn-label');
+
+      function clearFormErrors() {
         document.querySelectorAll('.field-error').forEach((el) => {
           el.classList.add('hidden');
           el.textContent = '';
         });
+        conflictAlert.classList.add('hidden');
+        if (conflictList) conflictList.innerHTML = '';
+        if (conflictTitle) conflictTitle.textContent = 'Unable to submit this request';
+        if (conflictText) conflictText.textContent = 'Please fix the problems listed below and try again.';
+      }
+
+      function showFormProblems(title, message, fieldErrors = {}) {
+        const entries = Object.entries(fieldErrors || {}).filter(([, msg]) => msg);
+        for (const [k, msg] of entries) {
+          const el = document.querySelector(`.field-error[data-for="${k}"]`);
+          if (el) {
+            el.textContent = msg;
+            el.classList.remove('hidden');
+          }
+        }
+        if (conflictTitle) conflictTitle.textContent = title || 'Unable to submit this request';
+        if (conflictText) {
+          conflictText.textContent = message || (entries.length
+            ? 'Please fix the highlighted fields and try again.'
+            : 'Something went wrong. Please review your details.');
+        }
+        if (conflictList) {
+          conflictList.innerHTML = entries.map(([, msg]) => `<li>${escapeHtml(String(msg))}</li>`).join('');
+        }
+        conflictAlert.classList.remove('hidden');
+        conflictAlert.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Focus first invalid field
+        const firstKey = entries[0]?.[0];
+        if (firstKey) {
+          const input = form.querySelector(`[name="${firstKey}"], #${firstKey}`);
+          if (input && typeof input.focus === 'function') {
+            try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); }
+          }
+        }
+        toast(message || title || 'Please fix the form errors.', 'error');
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearFormErrors();
 
         const fields = {
           venueId: form.venueId.value,
@@ -288,6 +387,7 @@
           purpose: form.purpose.value.trim(),
           eventType: form.eventType.value,
           attendees: form.attendees.value,
+          venueCapacity: venueCapacityById.get(String(form.venueId.value)) ?? null,
           departmentManagerId: form.departmentManagerId.value,
           additionalRequirements: form.additionalRequirements.value.trim(),
           requirements: [...document.querySelectorAll('#requirements-box .req-check:checked')].map((c) => ({
@@ -298,37 +398,53 @@
 
         const errors = validateBookingForm(fields);
         if (Object.keys(errors).length) {
-          for (const [k, msg] of Object.entries(errors)) {
-            const el = document.querySelector(`.field-error[data-for="${k}"]`);
-            if (el) {
-              el.textContent = msg;
-              el.classList.remove('hidden');
-            }
-          }
+          showFormProblems(
+            'Some required details are missing or invalid',
+            'Please complete the highlighted fields before submitting.',
+            errors
+          );
           return;
         }
 
         const btn = document.getElementById('submit-btn');
         btn.disabled = true;
-        btn.textContent = 'Submitting…';
+        if (submitBtnLabel) submitBtnLabel.textContent = 'Submitting…';
+        else btn.textContent = 'Submitting…';
         let saved = false;
         try {
           const booking = await createBooking(fields);
-          saved = true; // keep the button disabled so it can't be sent twice
+          saved = true;
           showConfirmation(booking, fields);
         } catch (err) {
-          if (err.status === 409 || err.status === 422) {
-            conflictText.textContent = err.message;
-            conflictAlert.classList.remove('hidden');
-            await calendar.refresh(); // someone may have just taken the slot
-            await loadAvail(); // ...or the last projector
-          } else {
-            toast(err.message || 'Could not submit the request.', 'error');
+          const fieldErrors = err.errors && typeof err.errors === 'object' ? err.errors : {};
+          // Map generic keys the API might use
+          if (!Object.keys(fieldErrors).length && err.message) {
+            const msg = String(err.message).toLowerCase();
+            if (msg.includes('capacit') || msg.includes('attendee')) fieldErrors.attendees = err.message;
+            else if (msg.includes('venue')) fieldErrors.venueId = err.message;
+            else if (msg.includes('date') || msg.includes('lead')) fieldErrors.date = err.message;
+            else if (msg.includes('time') || msg.includes('duration') || msg.includes('hours')) {
+              fieldErrors.startTime = err.message;
+            } else if (msg.includes('purpose')) fieldErrors.purpose = err.message;
+            else if (msg.includes('conflict') || msg.includes('already booked') || msg.includes('overlap')) {
+              /* keep as summary only */
+            }
           }
+          const title = err.status === 409
+            ? 'This slot is not available'
+            : err.status === 422
+              ? 'Cannot proceed with this booking'
+              : 'Could not submit the request';
+          showFormProblems(title, err.message || 'Please review your details and try again.', fieldErrors);
+          try {
+            await calendar.refresh();
+            await loadAvail();
+          } catch (_) {}
         } finally {
           if (!saved) {
             btn.disabled = false;
-            btn.textContent = 'Submit request';
+            if (submitBtnLabel) submitBtnLabel.textContent = 'Submit request';
+            else btn.textContent = 'Submit request';
           }
         }
       });

@@ -171,6 +171,22 @@ function route(string $method, string $path, array $body): void
         }
     }
 
+    if (preg_match('#^/bookings/(\d+)/history$#', $path, $m) && $method === 'GET') {
+        $user = Auth::requireUser();
+        $id = (int)$m[1];
+        $b = BookingService::getById($id);
+        if (!$b) {
+            Response::error('Not found.', 404);
+        }
+        if ($user['role'] === 'Employee' && $b['requesterId'] !== $user['id']) {
+            Response::error('Forbidden.', 403);
+        }
+        if ($user['role'] === 'Manager' && $user['departmentId'] && $b['departmentId']
+            && (int)$b['departmentId'] !== (int)$user['departmentId'] && $b['requesterId'] !== $user['id']) {
+            Response::error('Forbidden.', 403);
+        }
+        Response::json(['items' => $b['statusHistory'] ?? BookingService::getStatusHistory($id)]);
+    }
     if (preg_match('#^/bookings/(\d+)/validate$#', $path, $m) && $method === 'POST') {
         $user = Auth::requireUser();
         Permissions::require($user, 'booking.validate');

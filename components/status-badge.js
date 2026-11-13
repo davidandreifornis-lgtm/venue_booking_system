@@ -2,11 +2,16 @@ const MAP = {
   'Pending Manager Validation': 'badge badge-pending',
   'Manager Validated': 'badge badge-pending',
   'Pending HR Decision': 'badge badge-pending',
+  'Revision Requested': 'badge badge-pending',
+  'Reschedule Proposed': 'badge badge-rescheduled',
+  'Rejected by Manager': 'badge badge-declined',
   Approved: 'badge badge-approved',
   Declined: 'badge badge-declined',
   Rescheduled: 'badge badge-rescheduled',
   Cancelled: 'badge badge-cancelled',
   Completed: 'badge badge-done',
+  Expired: 'badge badge-cancelled',
+  'No-Show': 'badge badge-declined',
 };
 
 const parse = (d, t) => {

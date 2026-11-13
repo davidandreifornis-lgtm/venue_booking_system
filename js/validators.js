@@ -91,6 +91,11 @@ export function validateBookingForm(fields) {
     const n = Number(fields.attendees);
     if (!Number.isFinite(n) || n < 1) {
       errors.attendees = 'Attendees must be at least 1.';
+    } else if (fields.venueCapacity != null && Number.isFinite(Number(fields.venueCapacity))) {
+      const cap = Number(fields.venueCapacity);
+      if (n > cap) {
+        errors.attendees = `Cannot proceed: ${n} attendees exceed this venue's capacity limit of ${cap}. Choose a larger venue or reduce the attendee count.`;
+      }
     }
   }
   return errors;

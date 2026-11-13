@@ -16,6 +16,7 @@
       <div class="stat-card"><p class="label">Departments</p><p class="value" id="card-depts">0</p></div>
       <div class="stat-card"><p class="label">Venues</p><p class="value" id="card-venues">0</p></div>
       <div class="stat-card"><p class="label">Active bookings</p><p class="value" id="card-bookings">0</p></div>
+      <div class="stat-card"><p class="label">Expired</p><p class="value" id="card-expired">0</p><p class="hint">Undecided past events</p></div>
     </div>
 
     <div class="card">
@@ -26,10 +27,21 @@
             <a href="users.html" class="btn btn-outline btn-sm">Users</a>
             <a href="venues.html" class="btn btn-outline btn-sm">Venues</a>
             <a href="departments.html" class="btn btn-outline btn-sm">Departments</a>
+            <a href="all-bookings.html" class="btn btn-outline btn-sm">All bookings</a>
             <a href="reports.html" class="btn btn-outline btn-sm">Reports</a>
           </div>
         </div>
-        <p style="margin:0;color:#6c757d;font-size:0.9rem">Manage system configuration and review activity.</p>
+        <p style="margin:0;color:#6c757d;font-size:0.9rem">Manage system configuration and review activity. Use All Bookings → Expired to review requests that timed out undecided.</p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-body">
+        <div class="card-header-row">
+          <h2>Expired bookings</h2>
+          <a href="all-bookings.html" class="btn btn-outline btn-sm">Open All Bookings</a>
+        </div>
+        <div id="expired-list"></div>
       </div>
     </div>
 
@@ -48,7 +60,8 @@
     import '../js/app.js';
     import { getUsers, getDepartments, getVenues, getBookings, getActivityLogs } from '../js/api.js';
     import { emptyState } from '../components/empty-state.js';
-    import { escapeHtml } from '../js/utils.js';
+    import { statusBadge } from '../components/status-badge.js';
+    import { escapeHtml, formatDate } from '../js/utils.js';
 
     async function safeCount(fn) {
       try {
@@ -62,6 +75,32 @@
       document.getElementById('card-depts').textContent = String(await safeCount(() => getDepartments()));
       document.getElementById('card-venues').textContent = String(await safeCount(() => getVenues()));
       document.getElementById('card-bookings').textContent = String(await safeCount(() => getBookings({ status: 'Approved' })));
+
+      const expiredEl = document.getElementById('expired-list');
+      try {
+        const expiredData = await getBookings({ status: 'Expired' });
+        const expired = Array.isArray(expiredData) ? expiredData : expiredData?.items || [];
+        document.getElementById('card-expired').textContent = String(expired.length);
+        if (!expired.length) {
+          expiredEl.innerHTML = emptyState({ title: 'No expired bookings.', hint: 'Undecided requests whose event date passed will appear here.' });
+        } else {
+          expiredEl.innerHTML = `<div class="table-responsive"><table class="table"><thead><tr>
+            <th>Reference</th><th>Requester</th><th>Venue</th><th>Date</th><th>Status</th><th></th>
+          </tr></thead><tbody>
+            ${expired.slice(0, 20).map((b) => `<tr>
+              <td>${escapeHtml(b.ref || String(b.id) || '—')}</td>
+              <td>${escapeHtml(b.requesterName || '—')}</td>
+              <td>${escapeHtml(b.venueName || '—')}</td>
+              <td>${formatDate(b.date)}</td>
+              <td>${statusBadge(b)}</td>
+              <td><a class="btn btn-outline btn-sm" href="booking-details.html?id=${encodeURIComponent(b.id)}">Open</a></td>
+            </tr>`).join('')}
+          </tbody></table></div>`;
+        }
+      } catch {
+        document.getElementById('card-expired').textContent = '0';
+        expiredEl.innerHTML = emptyState({ title: 'No expired bookings.', hint: 'Unable to load list.' });
+      }
 
       const el = document.getElementById('activity-list');
       try {
