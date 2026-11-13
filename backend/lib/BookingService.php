@@ -1129,7 +1129,7 @@ $conflict = self::findConflict(
         return self::getById($id);
     }
 
-    /** Requester edits and resubmits after a revision request. */
+    /** Requester edits and resubmits after a revision request. Same validation rules as create. */
     public static function resubmit(array $user, int $id, array $payload): array
     {
         $b = self::getById($id);
@@ -1142,17 +1142,49 @@ $conflict = self::findConflict(
         if ($b['status'] !== self::STATUS_REVISION) {
             Response::error('Only bookings with requested revisions can be edited.', 409);
         }
-        $m = array_merge($b, array_intersect_key($payload, array_flip(['venueId', 'date', 'startTime', 'endTime', 'purpose', 'eventType', 'attendees', 'additionalRequirements'])));
+
+        // Merge edited fields onto the existing booking (unchanged fields keep original values).
+        $editable = ['venueId', 'date', 'startTime', 'endTime', 'purpose', 'eventType', 'attendees', 'additionalRequirements'];
+        $m = array_merge($b, array_intersect_key($payload, array_flip($editable)));
+        $m['venueId'] = (int)($m['venueId'] ?? $b['venueId']);
+        $m['attendees'] = max(1, (int)($m['attendees'] ?? $b['attendees'] ?? 1));
+        $m['purpose'] = trim((string)($m['purpose'] ?? ''));
+        $m['date'] = substr((string)($m['date'] ?? ''), 0, 10);
+
+        // Same rules as the original booking form (hours, capacity, lead days, schedule, etc.)
         $errors = self::validatePayload($m, $id, $user);
         if ($errors) {
             Response::error(reset($errors), 422, ['errors' => $errors]);
         }
+
+        $conflict = self::findConflict(
+            (int)$m['venueId'],
+            $m['date'],
+            self::normalizeTime($m['startTime']),
+            self::normalizeTime($m['endTime']),
+            $id
+        );
+        if ($conflict) {
+            Response::error(
+                'This venue is already booked, or too close to another booking, for the selected time (ref: ' . $conflict['ReferenceCode'] . ').',
+                409,
+                ['errors' => ['date' => 'Selected time conflicts with ' . $conflict['ReferenceCode'] . '.']]
+            );
+        }
+
         $next = $user['role'] === 'Manager' ? self::STATUS_PENDING_HR : self::STATUS_PENDING_MANAGER;
         $pdo = Database::pdo();
         $extra = '';
         $params = [
-            (int)$m['venueId'], substr($m['date'], 0, 10), self::normalizeTime($m['startTime']), self::normalizeTime($m['endTime']),
-            trim($m['purpose']), $m['eventType'] ?? null, max(1, (int)$m['attendees']), $m['additionalRequirements'] ?? null, $next,
+            (int)$m['venueId'],
+            $m['date'],
+            self::normalizeTime($m['startTime']),
+            self::normalizeTime($m['endTime']),
+            $m['purpose'],
+            $m['eventType'] ?? null,
+            $m['attendees'],
+            isset($m['additionalRequirements']) ? (string)$m['additionalRequirements'] : null,
+            $next,
         ];
         if (self::hasColumn($pdo, 'Bookings', 'StageEnteredAt')) {
             $extra = ', StageEnteredAt = SYSUTCDATETIME(), ReminderCount = 0, LastReminderAt = NULL, IsOverdue = 0, ManagerViewedAt = NULL, HrViewedAt = NULL';
@@ -1164,8 +1196,45 @@ $conflict = self::findConflict(
             "UPDATE dbo.Bookings SET VenueId = ?, BookingDate = ?, StartTime = ?, EndTime = ?, Purpose = ?, EventType = ?,
                 Attendees = ?, AdditionalRequirements = ?, Status = ?, UpdatedAt = SYSUTCDATETIME(){$extra} WHERE BookingId = ?"
         )->execute(array_merge($params, [$id]));
-        self::history($pdo, $id, self::STATUS_REVISION, $next, $user['id'], 'Revised and resubmitted');
-        ActivityLog::write($user['id'], $user['email'], 'booking.resubmit', 'booking', (string)$id, null);
+
+        // Audit trail: record what actually changed
+        $changes = [];
+        if ((int)$b['venueId'] !== (int)$m['venueId']) {
+            $changes[] = 'venue updated';
+        }
+        if (($b['date'] ?? '') !== $m['date']) {
+            $changes[] = 'date ' . ($b['date'] ?? '') . ' → ' . $m['date'];
+        }
+        $oldStart = self::normalizeTime((string)($b['startTime'] ?? ''));
+        $oldEnd = self::normalizeTime((string)($b['endTime'] ?? ''));
+        $newStart = self::normalizeTime($m['startTime']);
+        $newEnd = self::normalizeTime($m['endTime']);
+        if ($oldStart !== $newStart || $oldEnd !== $newEnd) {
+            $changes[] = "time {$oldStart}-{$oldEnd} → {$newStart}-{$newEnd}";
+        }
+        if ((int)($b['attendees'] ?? 0) !== (int)$m['attendees']) {
+            $changes[] = 'attendees ' . ($b['attendees'] ?? '') . ' → ' . $m['attendees'];
+        }
+        if (trim((string)($b['purpose'] ?? '')) !== $m['purpose']) {
+            $changes[] = 'purpose updated';
+        }
+        if (($b['eventType'] ?? null) !== ($m['eventType'] ?? null)) {
+            $changes[] = 'event type updated';
+        }
+        $reason = $changes
+            ? ('Revised and resubmitted: ' . implode('; ', $changes))
+            : 'Revised and resubmitted (details confirmed)';
+
+        self::history($pdo, $id, self::STATUS_REVISION, $next, $user['id'], self::clip($reason, 1000));
+        ActivityLog::write($user['id'], $user['email'], 'booking.resubmit', 'booking', (string)$id, [
+            'changes' => $changes,
+            'venueId' => (int)$m['venueId'],
+            'date' => $m['date'],
+            'startTime' => $newStart,
+            'endTime' => $newEnd,
+            'attendees' => $m['attendees'],
+        ]);
+
         if ($b['departmentManagerId'] && $next === self::STATUS_PENDING_MANAGER) {
             NotificationService::notify($b['departmentManagerId'], 'Request resubmitted', $b['ref'] . ' was revised.', 'booking-details.html?id=' . $id);
         }

@@ -62,7 +62,7 @@
 
   <script type="module">
     import '../js/app.js';
-    import { getBooking, validateBooking, approveBooking, declineBooking, rescheduleBooking, requestRevision, respondReschedule, resubmitBooking, emergencyOverride, getCompeting } from '../js/api.js';
+    import { getBooking, getVenues, validateBooking, approveBooking, declineBooking, rescheduleBooking, requestRevision, respondReschedule, resubmitBooking, emergencyOverride, getCompeting } from '../js/api.js';
     import { role, session } from '../js/auth.js';
     import { parseQuery, formatDate, formatTime, formatDateTime, escapeHtml } from '../js/utils.js';
     import { statusBadge } from '../components/status-badge.js';
@@ -227,23 +227,128 @@
       }
 
       if (isOwner && booking.status === 'Revision Requested' && actionBar) {
-        actionBar.innerHTML = `<p class="w-full text-sm mb-2">Manager comments: ${escapeHtml(booking.managerNotes || '—')}</p>
+        actionBar.innerHTML = `<p class="w-full text-sm mb-2">Revision notes: ${escapeHtml(booking.managerNotes || booking.hrNotes || '—')}</p>
           <button type="button" id="act-edit" class="px-4 py-2 text-sm bg-accent text-paper rounded-sm">Edit &amp; resubmit</button>`;
-        document.getElementById('act-edit').addEventListener('click', () => {
+        document.getElementById('act-edit').addEventListener('click', async () => {
+          // Load venues so the user can change room; pre-fill every field from the current booking.
+          let venueOptions = `<option value="${booking.venueId}">${escapeHtml(booking.venueName || 'Current venue')}</option>`;
+          const venueCaps = new Map();
+          try {
+            const data = await getVenues({ status: 'Available' });
+            const list = Array.isArray(data) ? data : data?.items || [];
+            if (list.length) {
+              venueOptions = list.map((v) => {
+                const cap = v.capacity != null ? Number(v.capacity) : null;
+                if (cap != null) venueCaps.set(String(v.id), cap);
+                const sel = String(v.id) === String(booking.venueId) ? ' selected' : '';
+                const capLabel = cap != null ? ` (cap. ${cap})` : '';
+                return `<option value="${v.id}"${sel}>${escapeHtml(v.name || String(v.id))}${capLabel}</option>`;
+              }).join('');
+            }
+          } catch (_) { /* keep single current-venue option */ }
+
+          const eventTypes = ['Meeting', 'Training', 'Conference', 'Workshop', 'Social', 'Other'];
+          const etOpts = eventTypes.map((t) => {
+            const sel = (booking.eventType || '') === t ? ' selected' : '';
+            return `<option value="${t}"${sel}>${t}</option>`;
+          }).join('');
+
+          const startVal = (booking.startTime || '').slice(0, 5);
+          const endVal = (booking.endTime || '').slice(0, 5);
+
           openModal({
             title: 'Edit & resubmit',
-            bodyHtml: `<label ${lb}>Date</label><input id="e-date" type="date" value="${booking.date}" ${fld} />
-              <label ${lb}>Start</label><input id="e-start" type="time" value="${booking.startTime}" ${fld} />
-              <label ${lb}>End</label><input id="e-end" type="time" value="${booking.endTime}" ${fld} />
-              <label ${lb}>Attendees</label><input id="e-att" type="number" min="1" value="${booking.attendees}" ${fld} />
-              <label ${lb}>Purpose</label><textarea id="e-purpose" rows="3" ${fld}>${escapeHtml(booking.purpose || '')}</textarea>`,
+            wide: true,
+            bodyHtml: `
+              <p class="text-sm text-muted mb-3">Update the booking details below. The same rules as a new request apply (capacity, hours, conflicts). Unchanged fields keep their original values until you edit them.</p>
+              <p id="e-err" class="hidden mb-2 text-sm text-clay"></p>
+              <label ${lb}>Venue</label>
+              <select id="e-venue" ${fld}>${venueOptions}</select>
+              <label ${lb}>Date</label>
+              <input id="e-date" type="date" value="${escapeHtml(booking.date || '')}" ${fld} />
+              <label ${lb}>Start</label>
+              <input id="e-start" type="time" value="${escapeHtml(startVal)}" ${fld} />
+              <label ${lb}>End</label>
+              <input id="e-end" type="time" value="${escapeHtml(endVal)}" ${fld} />
+              <label ${lb}>Event type</label>
+              <select id="e-eventType" ${fld}><option value="">Select…</option>${etOpts}</select>
+              <label ${lb}>Attendees</label>
+              <input id="e-att" type="number" min="1" value="${Number(booking.attendees) || 1}" ${fld} />
+              <p id="e-cap-hint" class="text-xs text-muted mt-1"></p>
+              <label ${lb}>Purpose</label>
+              <textarea id="e-purpose" rows="3" ${fld}>${escapeHtml(booking.purpose || '')}</textarea>
+              <label ${lb}>Additional requirements (optional)</label>
+              <textarea id="e-addl" rows="2" ${fld}>${escapeHtml(booking.additionalRequirements || '')}</textarea>
+            `,
             footerHtml: `${btnCancel}<button type="button" id="e-ok" class="px-3 py-1.5 text-sm bg-accent text-paper rounded-sm">Resubmit</button>`,
           });
+
+          const showCapHint = () => {
+            const cap = venueCaps.get(String(document.getElementById('e-venue')?.value));
+            const hint = document.getElementById('e-cap-hint');
+            const att = document.getElementById('e-att');
+            if (hint && cap != null) {
+              hint.textContent = `This venue holds up to ${cap} people.`;
+              if (att) att.max = String(cap);
+            } else if (hint) {
+              hint.textContent = '';
+              if (att) att.removeAttribute('max');
+            }
+          };
+          document.getElementById('e-venue')?.addEventListener('change', showCapHint);
+          showCapHint();
+
           document.querySelector('[data-cancel]')?.addEventListener('click', closeModal);
           document.getElementById('e-ok')?.addEventListener('click', () => {
-            const g = (x) => document.getElementById(x).value;
+            // Read values BEFORE closeModal() — closing removes the inputs from the DOM.
+            const venueId = Number(document.getElementById('e-venue')?.value || 0);
+            const date = document.getElementById('e-date')?.value || '';
+            const startTime = document.getElementById('e-start')?.value || '';
+            const endTime = document.getElementById('e-end')?.value || '';
+            const eventType = document.getElementById('e-eventType')?.value || '';
+            const attendees = Number(document.getElementById('e-att')?.value || 1);
+            const purpose = (document.getElementById('e-purpose')?.value || '').trim();
+            const additionalRequirements = (document.getElementById('e-addl')?.value || '').trim();
+            const errEl = document.getElementById('e-err');
+            const cap = venueCaps.get(String(venueId));
+
+            const problems = [];
+            if (!venueId) problems.push('Select a venue.');
+            if (!date) problems.push('Date is required.');
+            if (!startTime) problems.push('Start time is required.');
+            if (!endTime) problems.push('End time is required.');
+            if (!eventType) problems.push('Event type is required.');
+            if (!purpose) problems.push('Purpose is required.');
+            if (!Number.isFinite(attendees) || attendees < 1) problems.push('Attendees must be at least 1.');
+            if (cap != null && attendees > cap) {
+              problems.push(`Cannot proceed: ${attendees} attendees exceed this venue's capacity limit of ${cap}.`);
+            }
+            if (startTime && endTime && startTime >= endTime) {
+              problems.push('End time must be after start time.');
+            }
+            if (problems.length) {
+              if (errEl) {
+                errEl.textContent = problems.join(' ');
+                errEl.classList.remove('hidden');
+              }
+              toast(problems[0], 'error');
+              return;
+            }
+
             closeModal();
-            run(() => resubmitBooking(id, { date: g('e-date'), startTime: g('e-start'), endTime: g('e-end'), attendees: Number(g('e-att')), purpose: g('e-purpose') }), `${booking.ref} was resubmitted for review.`);
+            run(
+              () => resubmitBooking(id, {
+                venueId,
+                date,
+                startTime,
+                endTime,
+                eventType,
+                attendees,
+                purpose,
+                additionalRequirements: additionalRequirements || null,
+              }),
+              `${booking.ref} was resubmitted for review.`
+            );
           });
         });
       }
