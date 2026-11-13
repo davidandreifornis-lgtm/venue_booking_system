@@ -13,11 +13,13 @@ class BookingWorkflow
             'Rejected by Manager',
             'Revision Requested',
             'Cancelled',
+            'Expired',
         ],
         'Revision Requested' => [
             'Pending Manager Validation',
             'Pending HR Decision',
             'Cancelled',
+            'Expired',
         ],
         'Manager Validated' => [
             'Pending HR Decision',
@@ -26,6 +28,7 @@ class BookingWorkflow
             'Reschedule Proposed',
             'Revision Requested',
             'Cancelled',
+            'Expired',
         ],
         'Pending HR Decision' => [
             'Approved',
@@ -33,6 +36,7 @@ class BookingWorkflow
             'Reschedule Proposed',
             'Revision Requested',
             'Cancelled',
+            'Expired',
         ],
         'Reschedule Proposed' => [
             'Approved',          // requester accepts (or keeps an approved booking)
@@ -40,6 +44,7 @@ class BookingWorkflow
             'Pending HR Decision', // requester keeps original, back to the HR queue
             'Rescheduled',       // emergency override moves it immediately
             'Cancelled',
+            'Expired',
         ],
         'Approved' => [
             'Cancelled',
@@ -59,6 +64,7 @@ class BookingWorkflow
         'Cancelled' => [],
         'Completed' => ['No-Show'],
         'No-Show' => [],
+        'Expired' => [],
     ];
 
     public static function canTransition(string $from, string $to): bool
@@ -84,5 +90,17 @@ class BookingWorkflow
             'Reschedule Proposed' => 'Requester',
             default => null,
         };
+    }
+
+    /** Waiting states that participate in SLA / expiry jobs. */
+    public static function waitingStatuses(): array
+    {
+        return [
+            'Pending Manager Validation',
+            'Pending HR Decision',
+            'Manager Validated',
+            'Revision Requested',
+            'Reschedule Proposed',
+        ];
     }
 }

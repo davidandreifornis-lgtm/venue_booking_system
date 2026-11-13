@@ -157,6 +157,12 @@ function route(string $method, string $path, array $body): void
             if ($user['role'] === 'Manager' && $user['departmentId'] && $b['departmentId'] && $b['departmentId'] !== $user['departmentId'] && $b['requesterId'] !== $user['id']) {
                 Response::error('Forbidden.', 403);
             }
+            // Stamp "viewed" for the current stage owner (does not pause SLA)
+            try {
+                $b = BookingService::markViewed($user, $id);
+            } catch (Throwable $e) {
+                // non-fatal
+            }
             Response::json($b);
         }
         if ($method === 'PUT') {
@@ -656,6 +662,13 @@ function route(string $method, string $path, array $body): void
             'email_smtp_pass'         => [fn($v) => is_string($v) && strlen($v) <= 255, 'SMTP password is too long.'],
             'app_base_url'            => [fn($v) => is_string($v) && ($v === '' || preg_match('#^https?://[^\s]+$#', $v) === 1), 'Address must start with http:// or https://.'],
             'manager_sla_days'        => [fn($v) => $intIn($v, 0, 60), 'Manager SLA must be 0-60 days (0 = off).'],
+            'hr_sla_days'             => [fn($v) => $intIn($v, 0, 60), 'HR SLA must be 0-60 days (0 = off).'],
+            'reminder_interval_days'  => [fn($v) => $intIn($v, 0, 30), 'Reminder interval must be 0-30 days (0 = off).'],
+            'revision_deadline_days'  => [fn($v) => $intIn($v, 0, 30), 'Revision deadline must be 0-30 days (0 = off).'],
+            'proposal_deadline_days'  => [fn($v) => $intIn($v, 0, 30), 'Proposal deadline must be 0-30 days (0 = off).'],
+            'urgent_event_days'       => [fn($v) => $intIn($v, 0, 14), 'Urgent event window must be 0-14 days.'],
+            'expire_undecided_enabled'=> [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
+            'sla_notify_manager_on_escalation' => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
             'max_revisions'           => [fn($v) => $intIn($v, 0, 10), 'Maximum revisions must be 0-10.'],
             'auto_complete_enabled'   => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
             'venue_hours_enabled'     => [fn($v) => in_array((string)$v, ['0', '1'], true), 'Value must be 0 or 1.'],
@@ -718,6 +731,12 @@ function route(string $method, string $path, array $body): void
         $user = Auth::requireUser();
         Permissions::require($user, 'booking.decide');
         Response::json(BookingService::escalateOverdueManagerValidations());
+    }
+    // Full SLA / reminders / expiry job — call from Task Scheduler or cron every 15 min
+    if (($path === '/bookings/run-sla-jobs' || $path === '/bookings/run-sla') && $method === 'POST') {
+        $user = Auth::requireUser();
+        Permissions::require($user, 'booking.decide');
+        Response::json(BookingService::runSlaJobs());
     }
     if (preg_match('#^/bookings/(\d+)/queue$#', $path, $m) && $method === 'GET') {
         $user = Auth::requireUser();

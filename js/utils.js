@@ -2,12 +2,38 @@
  * Shared helpers. Pure functions only.
  */
 
+/**
+ * Company time zone. Times the server records for events (created, updated, notified, logged...) are stored in the
+ * database as UTC and are shown here in this zone for every user, whatever their device's clock is set to.
+ * Keep it equal to 'timezone' in backend/config/config.php.
+ */
+export const APP_TIMEZONE = 'Asia/Manila';
+
 export function formatDate(value, opts = {}) {
   if (!value) return '—';
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
   const defaults = { year: 'numeric', month: 'short', day: 'numeric' };
-  return d.toLocaleDateString('en-US', { ...defaults, ...opts });
+  // A bare calendar date (YYYY-MM-DD, e.g. a booking date) is parsed as UTC midnight: format it as UTC so it can never
+  // slip to the previous day on a device west of UTC.
+  const dateOnly = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  return d.toLocaleDateString('en-US', { ...defaults, ...(dateOnly ? { timeZone: 'UTC' } : {}), ...opts });
+}
+
+/**
+ * Parses a server timestamp. The API sends either ISO with "Z" or the database's plain "YYYY-MM-DD HH:MM:SS" - which
+ * is UTC but carries no zone, so the browser would wrongly read it as local time. Treat zone-less values as UTC.
+ */
+function parseServerTimestamp(value) {
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') {
+    const m = value.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})?$/);
+    if (m) {
+      const time = m[2].length === 5 ? `${m[2]}:00` : m[2];
+      return new Date(`${m[1]}T${time}${m[3] || 'Z'}`);
+    }
+  }
+  return new Date(value);
 }
 
 export function formatTime(value) {
@@ -25,9 +51,11 @@ export function formatTime(value) {
 
 export function formatDateTime(value) {
   if (!value) return '—';
-  const d = value instanceof Date ? value : new Date(value);
+  const d = parseServerTimestamp(value);
   if (Number.isNaN(d.getTime())) return '—';
-  return `${formatDate(d)} ${formatTime(d)}`;
+  const date = d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: APP_TIMEZONE });
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: APP_TIMEZONE });
+  return `${date} ${time}`;
 }
 
 /**

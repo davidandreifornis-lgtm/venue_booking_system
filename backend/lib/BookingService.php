@@ -22,6 +22,7 @@ class BookingService
     public const STATUS_REJECTED_MANAGER = 'Rejected by Manager';
     public const STATUS_PROPOSED = 'Reschedule Proposed';
     public const STATUS_NO_SHOW = 'No-Show';
+    public const STATUS_EXPIRED = 'Expired';
 
     /** How many days (from the original date) the auto-reschedule looks ahead for a free slot. */
     private const AUTO_SEARCH_DAYS = 7;
@@ -70,8 +71,8 @@ class BookingService
             'hrNotes' => $r['HrNotes'],
             'cancelReason' => $r['CancelReason'],
             'declineReason' => $r['DeclineReason'],
-            'createdAt' => $r['CreatedAt'] ?? null,
-            'updatedAt' => $r['UpdatedAt'] ?? null,
+            'createdAt' => self::fmtStamp($r['CreatedAt'] ?? null),   // UTC, ISO-8601 with Z
+            'updatedAt' => self::fmtStamp($r['UpdatedAt'] ?? null),
             'proposedVenueId' => isset($r['ProposedVenueId']) ? (int)$r['ProposedVenueId'] : null,
             'proposedDate' => !empty($r['ProposedDate']) ? self::fmtDate($r['ProposedDate']) : null,
             'proposedStartTime' => !empty($r['ProposedStartTime']) ? self::fmtTime($r['ProposedStartTime']) : null,
@@ -80,8 +81,39 @@ class BookingService
             'validatedAt' => self::fmtStamp($r['ValidatedAt'] ?? null),
             'managerValidatedAt' => self::fmtStamp($r['ValidatedAt'] ?? null),
             // When it entered HR's queue: manager validation time, or creation time for requests that skip the manager step.
-            'hrQueuedAt' => self::fmtStamp(($r['ValidatedAt'] ?? null) ?: ($r['CreatedAt'] ?? null)),
+            'hrQueuedAt' => self::fmtStamp(($r['ReachedHrAt'] ?? null) ?: (($r['ValidatedAt'] ?? null) ?: ($r['CreatedAt'] ?? null))),
+            'stageEnteredAt' => self::fmtStamp($r['StageEnteredAt'] ?? null),
+            'managerViewedAt' => self::fmtStamp($r['ManagerViewedAt'] ?? null),
+            'hrViewedAt' => self::fmtStamp($r['HrViewedAt'] ?? null),
+            'lastReminderAt' => self::fmtStamp($r['LastReminderAt'] ?? null),
+            'reminderCount' => isset($r['ReminderCount']) ? (int)$r['ReminderCount'] : 0,
+            'isOverdue' => !empty($r['IsOverdue']),
+            'waitingDays' => self::waitingDays($r),
         ];
+    }
+
+    /** Whole days the request has been in its current waiting stage (UTC). */
+    private static function waitingDays(array $r): ?int
+    {
+        $status = $r['Status'] ?? '';
+        if (!in_array($status, BookingWorkflow::waitingStatuses(), true)) {
+            return null;
+        }
+        $entered = $r['StageEnteredAt'] ?? $r['ReachedHrAt'] ?? $r['ValidatedAt'] ?? $r['CreatedAt'] ?? null;
+        if ($entered === null || $entered === '') {
+            return null;
+        }
+        try {
+            $t = $entered instanceof DateTimeInterface
+                ? $entered->getTimestamp()
+                : strtotime((string)$entered);
+            if ($t === false) {
+                return null;
+            }
+            return (int) max(0, floor((time() - $t) / 86400));
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 
     /** 'live' while an approved meeting is happening, 'done' once it has ended, else null. */
@@ -196,8 +228,9 @@ class BookingService
     }
 
     /**
-     * There is no cron job in a plain XAMPP/IIS install, so the manager-SLA escalation would never run on its own.
+     * There is no cron job in a plain XAMPP/IIS install, so SLA jobs would never run on their own.
      * Piggy-back on normal traffic: at most once every 5 minutes (per server) and never twice in one request.
+     * Prefer a real scheduler (Windows Task Scheduler / cron) calling POST /api/bookings/run-sla-jobs.
      */
     private static function maybeRunScheduledJobs(): void
     {
@@ -213,10 +246,40 @@ class BookingService
         }
         @touch($stamp);
         try {
-            self::escalateOverdueManagerValidations();
+            self::runSlaJobs();
         } catch (Throwable $e) {
-            error_log('Scheduled escalation failed: ' . $e->getMessage());
+            error_log('Scheduled SLA jobs failed: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Full SLA / reminder / expiry pass. Safe to call from a scheduler every 15 minutes.
+     * Returns counts of actions taken.
+     */
+    public static function runSlaJobs(): array
+    {
+        $out = [
+            'manager_reminders' => 0,
+            'manager_escalated' => 0,
+            'hr_reminders' => 0,
+            'hr_escalated' => 0,
+            'revision_expired' => 0,
+            'proposal_expired' => 0,
+            'event_expired' => 0,
+        ];
+        try {
+            $out['manager_reminders'] = self::sendStageReminders(self::STATUS_PENDING_MANAGER, 'Manager');
+            $out['manager_escalated'] = self::escalateOverdueManagerValidations()['escalated'] ?? 0;
+            $out['hr_reminders'] = self::sendStageReminders(self::STATUS_PENDING_HR, 'HR');
+            $out['hr_escalated'] = self::escalateOverdueHrDecisions()['escalated'] ?? 0;
+            $out['revision_expired'] = self::expireStaleRevisions();
+            $out['proposal_expired'] = self::expireStaleProposals();
+            $out['event_expired'] = self::expirePastUndecided();
+        } catch (Throwable $e) {
+            error_log('runSlaJobs error: ' . $e->getMessage());
+            $out['error'] = $e->getMessage();
+        }
+        return $out;
     }
 
     public static function listForUser(array $user, array $params = []): array
@@ -487,9 +550,38 @@ $conflict = self::findConflict(
                 $reachedHrAt = true;
             }
 
-            // Prefer extended columns when migration 12 has been applied
+            // Prefer extended columns when migrations 12/13 have been applied
             $hasExt = self::hasColumn($pdo, 'Bookings', 'ReachedHrAt');
-            if ($hasExt) {
+            $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
+            if ($hasExt && $hasStage) {
+                $stmt = $pdo->prepare(
+                    "INSERT INTO dbo.Bookings
+                      (ReferenceCode, VenueId, RequesterUserId, DepartmentId, DepartmentManagerId,
+                       BookingDate, StartTime, EndTime, Purpose, EventType, Attendees,
+                       AdditionalRequirements, Status, ReachedHrAt, BypassReason, StageEnteredAt)
+                     OUTPUT INSERTED.BookingId
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                             (CASE WHEN CAST(? AS INT) = 1 THEN SYSUTCDATETIME() ELSE NULL END),
+                             ?, SYSUTCDATETIME())"
+                );
+                $stmt->execute([
+                    $ref,
+                    (int)$payload['venueId'],
+                    $user['id'],
+                    $deptId,
+                    $mgrId ?: null,
+                    substr($payload['date'], 0, 10),
+                    self::normalizeTime($payload['startTime']),
+                    self::normalizeTime($payload['endTime']),
+                    trim($payload['purpose']),
+                    $payload['eventType'] ?? null,
+                    max(1, (int)($payload['attendees'] ?? 1)),
+                    $payload['additionalRequirements'] ?? null,
+                    $initial,
+                    $reachedHrAt ? 1 : 0,
+                    $bypassReason !== null ? self::clip($bypassReason, 500) : null,
+                ]);
+            } elseif ($hasExt) {
                 $stmt = $pdo->prepare(
                     "INSERT INTO dbo.Bookings
                       (ReferenceCode, VenueId, RequesterUserId, DepartmentId, DepartmentManagerId,
@@ -512,7 +604,7 @@ $conflict = self::findConflict(
                     max(1, (int)($payload['attendees'] ?? 1)),
                     $payload['additionalRequirements'] ?? null,
                     $initial,
-                    $reachedHrAt ? 1 : 0, // timestamp is taken from the DB clock (UTC), same as validation time
+                    $reachedHrAt ? 1 : 0,
                     $bypassReason !== null ? self::clip($bypassReason, 500) : null,
                 ]);
             } else {
@@ -611,7 +703,22 @@ $conflict = self::findConflict(
         }
 
         $pdo = Database::pdo();
-        if (self::hasColumn($pdo, 'Bookings', 'ReachedHrAt')) {
+        $hasReached = self::hasColumn($pdo, 'Bookings', 'ReachedHrAt');
+        $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
+        if ($hasReached && $hasStage) {
+            $pdo->prepare(
+                "UPDATE dbo.Bookings SET Status = ?, ManagerNotes = ?, ValidatedAt = SYSUTCDATETIME(),
+                    ValidatedByUserId = ?, ReachedHrAt = SYSUTCDATETIME(), StageEnteredAt = SYSUTCDATETIME(),
+                    ReminderCount = 0, LastReminderAt = NULL, IsOverdue = 0,
+                    UpdatedAt = SYSUTCDATETIME(),
+                    RowVersion = ISNULL(RowVersion, 1) + 1 WHERE BookingId = ?"
+            )->execute([
+                self::STATUS_PENDING_HR,
+                $payload['notes'] ?? null,
+                $user['id'],
+                $id,
+            ]);
+        } elseif ($hasReached) {
             $pdo->prepare(
                 "UPDATE dbo.Bookings SET Status = ?, ManagerNotes = ?, ValidatedAt = SYSUTCDATETIME(),
                     ValidatedByUserId = ?, ReachedHrAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME(),
@@ -965,12 +1072,18 @@ $conflict = self::findConflict(
             }
             // Manager comments go to ManagerNotes, HR/Admin comments to HrNotes (column chosen here, not in SQL).
             $noteCol = in_array($user['role'], ['HR', 'Administrator'], true) ? 'HrNotes' : 'ManagerNotes';
+            $stageSql = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt')
+                ? ', StageEnteredAt = SYSUTCDATETIME(), ReminderCount = 0, LastReminderAt = NULL, IsOverdue = 0'
+                : '';
             $pdo->prepare(
                 "UPDATE dbo.Bookings SET Status = ?, RevisionCount = RevisionCount + 1, {$noteCol} = ?,
-                    UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
+                    UpdatedAt = SYSUTCDATETIME(){$stageSql} WHERE BookingId = ?"
             )->execute([self::STATUS_REVISION, $notes, $id]);
         } else {
-            $pdo->prepare("UPDATE dbo.Bookings SET Status = ?, ManagerNotes = ?, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?")
+            $stageSql = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt')
+                ? ', StageEnteredAt = SYSUTCDATETIME()'
+                : '';
+            $pdo->prepare("UPDATE dbo.Bookings SET Status = ?, ManagerNotes = ?, UpdatedAt = SYSUTCDATETIME(){$stageSql} WHERE BookingId = ?")
                 ->execute([self::STATUS_REVISION, $notes, $id]);
         }
         self::history($pdo, $id, $b['status'], self::STATUS_REVISION, $user['id'], $notes);
@@ -999,17 +1112,30 @@ $conflict = self::findConflict(
         }
         $next = $user['role'] === 'Manager' ? self::STATUS_PENDING_HR : self::STATUS_PENDING_MANAGER;
         $pdo = Database::pdo();
+        $extra = '';
+        $params = [
+            (int)$m['venueId'], substr($m['date'], 0, 10), self::normalizeTime($m['startTime']), self::normalizeTime($m['endTime']),
+            trim($m['purpose']), $m['eventType'] ?? null, max(1, (int)$m['attendees']), $m['additionalRequirements'] ?? null, $next,
+        ];
+        if (self::hasColumn($pdo, 'Bookings', 'StageEnteredAt')) {
+            $extra = ', StageEnteredAt = SYSUTCDATETIME(), ReminderCount = 0, LastReminderAt = NULL, IsOverdue = 0, ManagerViewedAt = NULL, HrViewedAt = NULL';
+            if ($next === self::STATUS_PENDING_HR && self::hasColumn($pdo, 'Bookings', 'ReachedHrAt')) {
+                $extra .= ', ReachedHrAt = SYSUTCDATETIME()';
+            }
+        }
         $pdo->prepare(
             "UPDATE dbo.Bookings SET VenueId = ?, BookingDate = ?, StartTime = ?, EndTime = ?, Purpose = ?, EventType = ?,
-                Attendees = ?, AdditionalRequirements = ?, Status = ?, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
-        )->execute([
-            (int)$m['venueId'], substr($m['date'], 0, 10), self::normalizeTime($m['startTime']), self::normalizeTime($m['endTime']),
-            trim($m['purpose']), $m['eventType'] ?? null, max(1, (int)$m['attendees']), $m['additionalRequirements'] ?? null, $next, $id,
-        ]);
+                Attendees = ?, AdditionalRequirements = ?, Status = ?, UpdatedAt = SYSUTCDATETIME(){$extra} WHERE BookingId = ?"
+        )->execute(array_merge($params, [$id]));
         self::history($pdo, $id, self::STATUS_REVISION, $next, $user['id'], 'Revised and resubmitted');
         ActivityLog::write($user['id'], $user['email'], 'booking.resubmit', 'booking', (string)$id, null);
         if ($b['departmentManagerId'] && $next === self::STATUS_PENDING_MANAGER) {
             NotificationService::notify($b['departmentManagerId'], 'Request resubmitted', $b['ref'] . ' was revised.', 'booking-details.html?id=' . $id);
+        }
+        if ($next === self::STATUS_PENDING_HR) {
+            foreach (self::usersByRole('HR') as $hrId) {
+                NotificationService::notify($hrId, 'Request resubmitted', $b['ref'] . ' was revised and is awaiting HR.', 'booking-details.html?id=' . $id);
+            }
         }
         return self::getById($id);
     }
@@ -1818,6 +1944,8 @@ $conflict = self::findConflict(
 
     /**
      * Escalate Pending Manager requests older than manager_sla_days to Pending HR.
+     * Uses StageEnteredAt (or CreatedAt fallback) so resubmitted requests get a fresh clock.
+     * Urgent events (within urgent_event_days) use a 1-day SLA.
      */
     public static function escalateOverdueManagerValidations(): array
     {
@@ -1825,38 +1953,370 @@ $conflict = self::findConflict(
         if ($days <= 0) {
             return ['escalated' => 0, 'disabled' => true];
         }
+        $urgentDays = Settings::int('urgent_event_days', 3);
         $pdo = Database::pdo();
+        $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
         $hasReached = self::hasColumn($pdo, 'Bookings', 'ReachedHrAt');
+        $hasOverdue = self::hasColumn($pdo, 'Bookings', 'IsOverdue');
+
+        $clock = $hasStage
+            ? 'COALESCE(StageEnteredAt, CreatedAt)'
+            : 'CreatedAt';
+
+        // Standard SLA
+        $setParts = ['Status = ?', 'UpdatedAt = SYSUTCDATETIME()'];
         if ($hasReached) {
-            $sql = "UPDATE dbo.Bookings
-                    SET Status = ?, ReachedHrAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
-                    OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId
-                    WHERE Status = ?
-                      AND CreatedAt < DATEADD(DAY, -?, SYSUTCDATETIME())";
-        } else {
-            $sql = "UPDATE dbo.Bookings
-                    SET Status = ?, UpdatedAt = SYSUTCDATETIME()
-                    OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId
-                    WHERE Status = ?
-                      AND CreatedAt < DATEADD(DAY, -?, SYSUTCDATETIME())";
+            $setParts[] = 'ReachedHrAt = SYSUTCDATETIME()';
         }
+        if ($hasStage) {
+            $setParts[] = 'StageEnteredAt = SYSUTCDATETIME()';
+        }
+        if ($hasOverdue) {
+            $setParts[] = 'IsOverdue = 1';
+        }
+        // Clear manager viewed so HR stage starts clean; reminder counters reset
+        if (self::hasColumn($pdo, 'Bookings', 'ReminderCount')) {
+            $setParts[] = 'ReminderCount = 0';
+            $setParts[] = 'LastReminderAt = NULL';
+        }
+
+        $sql = "UPDATE dbo.Bookings
+                SET " . implode(', ', $setParts) . "
+                OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId, INSERTED.DepartmentManagerId
+                WHERE Status = ?
+                  AND {$clock} < DATEADD(DAY, -?, SYSUTCDATETIME())
+                  AND (
+                    BookingDate > DATEADD(DAY, ?, CAST(SYSUTCDATETIME() AS DATE))
+                    OR {$clock} < DATEADD(DAY, -1, SYSUTCDATETIME())
+                  )";
+        // For urgent events (event within urgentDays), also escalate if stage older than 1 day
+        // The OR above: if event is far away use full $days; if event is soon, 1-day floor already covered by the second clause when days>1.
+        // Simpler approach: use effective days = 1 when event is soon.
+        $sql = "UPDATE dbo.Bookings
+                SET " . implode(', ', $setParts) . "
+                OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId, INSERTED.DepartmentManagerId
+                WHERE Status = ?
+                  AND (
+                    ({$clock} < DATEADD(DAY, -?, SYSUTCDATETIME()) AND BookingDate > DATEADD(DAY, ?, CAST(SYSUTCDATETIME() AS DATE)))
+                    OR
+                    ({$clock} < DATEADD(DAY, -1, SYSUTCDATETIME()) AND BookingDate <= DATEADD(DAY, ?, CAST(SYSUTCDATETIME() AS DATE)))
+                  )";
+
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([self::STATUS_PENDING_HR, self::STATUS_PENDING_MANAGER, $days]);
+        $stmt->execute([
+            self::STATUS_PENDING_HR,
+            self::STATUS_PENDING_MANAGER,
+            $days,
+            $urgentDays,
+            $urgentDays,
+        ]);
         $rows = $stmt->fetchAll();
+        $notifyManager = Settings::get('sla_notify_manager_on_escalation', '1') === '1';
+
         foreach ($rows as $r) {
-            self::history($pdo, (int)$r['BookingId'], self::STATUS_PENDING_MANAGER, self::STATUS_PENDING_HR, null,
-                "Auto-escalated to HR after {$days} day manager SLA");
+            $bid = (int)$r['BookingId'];
+            self::history($pdo, $bid, self::STATUS_PENDING_MANAGER, self::STATUS_PENDING_HR, null,
+                "Auto-escalated to HR after manager SLA");
             NotificationService::notify(
                 (int)$r['RequesterUserId'],
                 'Request escalated to HR',
-                'Your booking ' . $r['ReferenceCode'] . ' was escalated because the manager SLA elapsed.',
-                'booking-details.html?id=' . $r['BookingId']
+                'Your booking ' . $r['ReferenceCode'] . ' was escalated because the manager did not act within the SLA.',
+                'booking-details.html?id=' . $bid
             );
-            foreach (self::usersByRole('HR') as $hrId) {
-                NotificationService::notify($hrId, 'Escalated booking', $r['ReferenceCode'] . ' awaits HR (manager SLA).', 'booking-details.html?id=' . $r['BookingId']);
+            if ($notifyManager && !empty($r['DepartmentManagerId'])) {
+                NotificationService::notify(
+                    (int)$r['DepartmentManagerId'],
+                    'Request auto-escalated',
+                    $r['ReferenceCode'] . ' was moved to HR because the manager SLA elapsed.',
+                    'booking-details.html?id=' . $bid
+                );
+            }
+            $hrIds = self::usersByRole('HR');
+            if (empty($hrIds)) {
+                $hrIds = self::usersByRole('Administrator');
+            }
+            foreach ($hrIds as $hrId) {
+                NotificationService::notify($hrId, 'Escalated booking', $r['ReferenceCode'] . ' awaits HR (manager SLA).', 'booking-details.html?id=' . $bid);
             }
         }
         return ['escalated' => count($rows)];
+    }
+
+    /**
+     * Escalate Pending HR requests older than hr_sla_days; notify Administrators.
+     */
+    public static function escalateOverdueHrDecisions(): array
+    {
+        $days = Settings::int('hr_sla_days', 3);
+        if ($days <= 0) {
+            return ['escalated' => 0, 'disabled' => true];
+        }
+        $pdo = Database::pdo();
+        $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
+        $hasOverdue = self::hasColumn($pdo, 'Bookings', 'IsOverdue');
+        $clock = $hasStage ? 'COALESCE(StageEnteredAt, ReachedHrAt, CreatedAt)' : 'COALESCE(ReachedHrAt, CreatedAt)';
+
+        $setParts = ['UpdatedAt = SYSUTCDATETIME()'];
+        if ($hasOverdue) {
+            $setParts[] = 'IsOverdue = 1';
+        }
+        // We keep status as Pending HR but flag overdue and alert admins (no status change required).
+        $sql = "UPDATE dbo.Bookings
+                SET " . implode(', ', $setParts) . "
+                OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId
+                WHERE Status IN (?, ?)
+                  AND {$clock} < DATEADD(DAY, -?, SYSUTCDATETIME())
+                  AND (" . ($hasOverdue ? 'IsOverdue = 0' : '1=1') . ")";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([self::STATUS_PENDING_HR, self::STATUS_MANAGER_VALIDATED, $days]);
+        $rows = $stmt->fetchAll();
+
+        $adminIds = self::usersByRole('Administrator');
+        $hrIds = self::usersByRole('HR');
+        foreach ($rows as $r) {
+            $bid = (int)$r['BookingId'];
+            self::history($pdo, $bid, self::STATUS_PENDING_HR, self::STATUS_PENDING_HR, null,
+                "HR SLA exceeded ({$days} days) — escalated to Administrator attention");
+            NotificationService::notify(
+                (int)$r['RequesterUserId'],
+                'Request still awaiting HR',
+                'Your booking ' . $r['ReferenceCode'] . ' has exceeded the HR decision SLA. Administrators have been notified.',
+                'booking-details.html?id=' . $bid
+            );
+            foreach (array_unique(array_merge($adminIds, $hrIds)) as $uid) {
+                NotificationService::notify(
+                    (int)$uid,
+                    'Overdue HR decision',
+                    $r['ReferenceCode'] . ' has been waiting longer than the HR SLA.',
+                    'booking-details.html?id=' . $bid
+                );
+            }
+        }
+        return ['escalated' => count($rows)];
+    }
+
+    /**
+     * Send periodic reminders to the current stage owner.
+     * Returns number of reminders sent.
+     */
+    private static function sendStageReminders(string $status, string $roleCode): int
+    {
+        $interval = Settings::int('reminder_interval_days', 1);
+        if ($interval <= 0) {
+            return 0;
+        }
+        $pdo = Database::pdo();
+        $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
+        $hasRem = self::hasColumn($pdo, 'Bookings', 'LastReminderAt');
+        if (!$hasRem) {
+            return 0;
+        }
+        $clock = $hasStage ? 'COALESCE(StageEnteredAt, CreatedAt)' : 'CreatedAt';
+
+        $sql = "SELECT BookingId, ReferenceCode, RequesterUserId, DepartmentManagerId, Status,
+                       ManagerViewedAt, HrViewedAt, ReminderCount
+                FROM dbo.Bookings
+                WHERE Status = ?
+                  AND {$clock} < DATEADD(DAY, -?, SYSUTCDATETIME())
+                  AND (LastReminderAt IS NULL OR LastReminderAt < DATEADD(DAY, -?, SYSUTCDATETIME()))";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$status, $interval, $interval]);
+        $rows = $stmt->fetchAll();
+        $count = 0;
+        foreach ($rows as $r) {
+            $bid = (int)$r['BookingId'];
+            $viewedNote = '';
+            if ($roleCode === 'Manager' && empty($r['ManagerViewedAt'])) {
+                $viewedNote = ' (not yet opened)';
+            } elseif ($roleCode === 'HR' && empty($r['HrViewedAt'])) {
+                $viewedNote = ' (not yet opened)';
+            } else {
+                $viewedNote = ' (opened, awaiting decision)';
+            }
+            $targets = [];
+            if ($roleCode === 'Manager' && !empty($r['DepartmentManagerId'])) {
+                $targets[] = (int)$r['DepartmentManagerId'];
+            } elseif ($roleCode === 'HR') {
+                $targets = self::usersByRole('HR');
+                if (empty($targets)) {
+                    $targets = self::usersByRole('Administrator');
+                }
+            }
+            foreach ($targets as $uid) {
+                NotificationService::notify(
+                    $uid,
+                    'Reminder: action required',
+                    $r['ReferenceCode'] . ' is still waiting for ' . $roleCode . $viewedNote . '.',
+                    'booking-details.html?id=' . $bid
+                );
+            }
+            // Also tell requester who it is waiting on
+            NotificationService::notify(
+                (int)$r['RequesterUserId'],
+                'Still waiting on ' . $roleCode,
+                'Your booking ' . $r['ReferenceCode'] . ' is still awaiting a decision from ' . $roleCode . '.',
+                'booking-details.html?id=' . $bid
+            );
+            $pdo->prepare(
+                "UPDATE dbo.Bookings SET LastReminderAt = SYSUTCDATETIME(),
+                    ReminderCount = ISNULL(ReminderCount, 0) + 1, UpdatedAt = SYSUTCDATETIME()
+                 WHERE BookingId = ?"
+            )->execute([$bid]);
+            $count++;
+        }
+        return $count;
+    }
+
+    /**
+     * Auto-cancel Revision Requested after revision_deadline_days and free the slot.
+     */
+    private static function expireStaleRevisions(): int
+    {
+        $days = Settings::int('revision_deadline_days', 3);
+        if ($days <= 0) {
+            return 0;
+        }
+        $pdo = Database::pdo();
+        $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
+        $clock = $hasStage ? 'COALESCE(StageEnteredAt, UpdatedAt, CreatedAt)' : 'COALESCE(UpdatedAt, CreatedAt)';
+        $sql = "UPDATE dbo.Bookings
+                SET Status = ?, CancelReason = ?, CancelledAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
+                OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId, DELETED.Status AS FromStatus
+                WHERE Status = ?
+                  AND {$clock} < DATEADD(DAY, -?, SYSUTCDATETIME())";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            self::STATUS_CANCELLED,
+            "Automatically cancelled: revision not submitted within {$days} days",
+            self::STATUS_REVISION,
+            $days,
+        ]);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as $r) {
+            self::history($pdo, (int)$r['BookingId'], $r['FromStatus'] ?? self::STATUS_REVISION, self::STATUS_CANCELLED, null,
+                "Revision deadline ({$days} days) elapsed");
+            NotificationService::notify(
+                (int)$r['RequesterUserId'],
+                'Request cancelled',
+                $r['ReferenceCode'] . ' was cancelled because the revision was not submitted in time.',
+                'booking-details.html?id=' . $r['BookingId']
+            );
+        }
+        return count($rows);
+    }
+
+    /**
+     * Auto-cancel unanswered Reschedule Proposed after proposal_deadline_days.
+     */
+    private static function expireStaleProposals(): int
+    {
+        $days = Settings::int('proposal_deadline_days', 3);
+        if ($days <= 0) {
+            return 0;
+        }
+        $pdo = Database::pdo();
+        $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
+        $clock = $hasStage ? 'COALESCE(StageEnteredAt, UpdatedAt, CreatedAt)' : 'COALESCE(UpdatedAt, CreatedAt)';
+        $sql = "UPDATE dbo.Bookings
+                SET Status = ?, CancelReason = ?, CancelledAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
+                OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId, DELETED.Status AS FromStatus
+                WHERE Status = ?
+                  AND {$clock} < DATEADD(DAY, -?, SYSUTCDATETIME())";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            self::STATUS_CANCELLED,
+            "Automatically cancelled: reschedule proposal not answered within {$days} days",
+            self::STATUS_PROPOSED,
+            $days,
+        ]);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as $r) {
+            self::history($pdo, (int)$r['BookingId'], $r['FromStatus'] ?? self::STATUS_PROPOSED, self::STATUS_CANCELLED, null,
+                "Proposal deadline ({$days} days) elapsed");
+            NotificationService::notify(
+                (int)$r['RequesterUserId'],
+                'Proposal expired',
+                $r['ReferenceCode'] . ' was cancelled because the reschedule proposal was not answered in time. The slot has been freed.',
+                'booking-details.html?id=' . $r['BookingId']
+            );
+            foreach (self::usersByRole('HR') as $hrId) {
+                NotificationService::notify($hrId, 'Proposal expired', $r['ReferenceCode'] . ' cancelled (unanswered proposal).', 'booking-details.html?id=' . $r['BookingId']);
+            }
+        }
+        return count($rows);
+    }
+
+    /**
+     * Mark undecided bookings whose event date has already passed as Expired (never auto-approve).
+     */
+    private static function expirePastUndecided(): int
+    {
+        if (Settings::get('expire_undecided_enabled', '1') !== '1') {
+            return 0;
+        }
+        $pdo = Database::pdo();
+        $waiting = [
+            self::STATUS_PENDING_MANAGER,
+            self::STATUS_PENDING_HR,
+            self::STATUS_MANAGER_VALIDATED,
+            self::STATUS_REVISION,
+            self::STATUS_PROPOSED,
+        ];
+        $placeholders = implode(',', array_fill(0, count($waiting), '?'));
+        $sql = "UPDATE dbo.Bookings
+                SET Status = ?, UpdatedAt = SYSUTCDATETIME()
+                OUTPUT INSERTED.BookingId, INSERTED.ReferenceCode, INSERTED.RequesterUserId, DELETED.Status AS FromStatus
+                WHERE Status IN ($placeholders)
+                  AND BookingDate < CAST(SYSUTCDATETIME() AS DATE)";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_merge([self::STATUS_EXPIRED], $waiting));
+        $rows = $stmt->fetchAll();
+        foreach ($rows as $r) {
+            self::history($pdo, (int)$r['BookingId'], $r['FromStatus'] ?? 'Unknown', self::STATUS_EXPIRED, null,
+                'Event date passed while still undecided — marked Expired');
+            NotificationService::notify(
+                (int)$r['RequesterUserId'],
+                'Booking expired',
+                $r['ReferenceCode'] . ' could not be decided before the event date. Please make other arrangements.',
+                'booking-details.html?id=' . $r['BookingId']
+            );
+        }
+        return count($rows);
+    }
+
+    /**
+     * Record that the current stage owner opened the booking details.
+     * Viewing never pauses the SLA clock.
+     */
+    public static function markViewed(array $user, int $id): array
+    {
+        $b = self::getById($id);
+        if (!$b) {
+            Response::error('Booking not found.', 404);
+        }
+        $pdo = Database::pdo();
+        $role = $user['role'] ?? '';
+        $status = $b['status'];
+
+        if ($role === 'Manager'
+            && in_array($status, [self::STATUS_PENDING_MANAGER, self::STATUS_REVISION], true)
+            && self::hasColumn($pdo, 'Bookings', 'ManagerViewedAt')
+        ) {
+            // Only stamp if not already viewed (first open)
+            $pdo->prepare(
+                "UPDATE dbo.Bookings SET ManagerViewedAt = COALESCE(ManagerViewedAt, SYSUTCDATETIME()),
+                    UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ? AND ManagerViewedAt IS NULL"
+            )->execute([$id]);
+        } elseif (in_array($role, ['HR', 'Administrator'], true)
+            && in_array($status, [self::STATUS_PENDING_HR, self::STATUS_MANAGER_VALIDATED], true)
+            && self::hasColumn($pdo, 'Bookings', 'HrViewedAt')
+        ) {
+            $pdo->prepare(
+                "UPDATE dbo.Bookings SET HrViewedAt = COALESCE(HrViewedAt, SYSUTCDATETIME()),
+                    UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ? AND HrViewedAt IS NULL"
+            )->execute([$id]);
+        }
+        return self::getById($id);
     }
 
     /**
@@ -1873,18 +2333,18 @@ $conflict = self::findConflict(
         $stmt->execute([self::STATUS_PENDING_MANAGER, $userId, $userId]);
         $rows = $stmt->fetchAll();
         $moved = 0;
+        $hasStage = self::hasColumn($pdo, 'Bookings', 'StageEnteredAt');
         foreach ($rows as $r) {
             $id = (int)$r['BookingId'];
+            $sets = 'Status = ?, DepartmentManagerId = NULL, UpdatedAt = SYSUTCDATETIME()';
             if (self::hasColumn($pdo, 'Bookings', 'ReachedHrAt')) {
-                $pdo->prepare(
-                    "UPDATE dbo.Bookings SET Status = ?, DepartmentManagerId = NULL,
-                        ReachedHrAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
-                )->execute([self::STATUS_PENDING_HR, $id]);
-            } else {
-                $pdo->prepare(
-                    "UPDATE dbo.Bookings SET Status = ?, DepartmentManagerId = NULL, UpdatedAt = SYSUTCDATETIME() WHERE BookingId = ?"
-                )->execute([self::STATUS_PENDING_HR, $id]);
+                $sets .= ', ReachedHrAt = SYSUTCDATETIME()';
             }
+            if ($hasStage) {
+                $sets .= ', StageEnteredAt = SYSUTCDATETIME()';
+            }
+            $pdo->prepare("UPDATE dbo.Bookings SET {$sets} WHERE BookingId = ?")
+                ->execute([self::STATUS_PENDING_HR, $id]);
             self::history($pdo, $id, self::STATUS_PENDING_MANAGER, self::STATUS_PENDING_HR, null,
                 'Approver deactivated; escalated to HR');
             NotificationService::notify(
